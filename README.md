@@ -16,7 +16,8 @@ ring.
 - A slim quota pill in the session footer. It shows the **5-hour remaining**
   percentage by default.
 - Click the pill to open a panel with the **5-hour** and **weekly** remaining
-  quota, the reset countdown, a per-model breakdown and the settings.
+  quota, the exact reset date of each window, a per-model breakdown and the
+  settings.
 - The default metric is configurable: `5-hour remaining`, `weekly remaining`,
   **lowest absolute tokens** or **lowest percentage**.
 - The API key is **encrypted at rest**: it is sealed with AES-256-GCM using a
@@ -112,7 +113,7 @@ Open the pill → **设置 / Settings**:
 **MiniMax Token Plan（M Plan）** 的剩余用量。
 
 - 默认显示 **5 小时剩余**百分比；点击展开面板，可同时查看 **5 小时** 与
-  **每周**剩余、重置倒计时、分模型明细以及设置。
+  **每周**剩余、两个窗口各自的重置日期、分模型明细以及设置。
 - 默认显示的指标可配置：`5 小时剩余`、`周剩余`、`绝对 token 最低`、
   `百分比最低`。
 - API Key **加密保存**：使用不可导出的 AES-256-GCM 密钥加密后存入浏览器

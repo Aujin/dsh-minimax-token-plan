@@ -76,7 +76,8 @@ window.__ModuleLoader__.load({
       'panel.interval': '5 小时剩余',
       'panel.weekly': '周剩余',
       'panel.displayed': '当前显示',
-      'panel.resetIn': '{time} 后重置',
+      'panel.intervalReset': '5 小时重置',
+      'panel.weeklyReset': '周重置',
       'panel.updatedAt': '更新于',
       'panel.models': '模型明细',
       'panel.model': '模型',
@@ -113,10 +114,6 @@ window.__ModuleLoader__.load({
       'settings.security': 'API Key 使用 AES-256-GCM 加密后保存在本机 IndexedDB，密钥不可导出；请求只发往 MiniMax 官方域名。',
       'settings.keyPresent': '已保存 API Key（已加密）',
       'settings.keyMissing': '尚未保存 API Key',
-      'duration.hm': '{h} 小时 {m} 分',
-      'duration.h': '{h} 小时',
-      'duration.m': '{m} 分',
-      'duration.s': '{s} 秒',
       'metric.interval': '5 小时剩余',
       'metric.weekly': '周剩余',
       'metric.lowestAbsolute': '绝对 token 最低',
@@ -138,7 +135,8 @@ window.__ModuleLoader__.load({
       'panel.interval': '5-hour remaining',
       'panel.weekly': 'Weekly remaining',
       'panel.displayed': 'Showing',
-      'panel.resetIn': 'resets in {time}',
+      'panel.intervalReset': '5-hour reset',
+      'panel.weeklyReset': 'Weekly reset',
       'panel.updatedAt': 'Updated at',
       'panel.models': 'Models',
       'panel.model': 'Model',
@@ -175,10 +173,6 @@ window.__ModuleLoader__.load({
       'settings.security': 'The API key is encrypted with AES-256-GCM and stored in the local IndexedDB; the key itself is non-extractable. Requests only reach the official MiniMax hosts.',
       'settings.keyPresent': 'API key saved (encrypted)',
       'settings.keyMissing': 'No API key saved yet',
-      'duration.hm': '{h}h {m}m',
-      'duration.h': '{h}h',
-      'duration.m': '{m}m',
-      'duration.s': '{s}s',
       'metric.interval': '5-hour remaining',
       'metric.weekly': 'Weekly remaining',
       'metric.lowestAbsolute': 'Lowest absolute tokens',
@@ -220,31 +214,38 @@ window.__ModuleLoader__.load({
       return Math.round(value).toLocaleString()
     }
 
-    function formatDuration(ms, t) {
-      if (ms === null || ms === undefined || !Number.isFinite(ms) || ms < 0) return '—'
-      const totalMinutes = Math.floor(ms / 60000)
-      const hours = Math.floor(totalMinutes / 60)
-      const minutes = totalMinutes % 60
-      const translate = typeof t === 'function' ? t : null
-      if (hours > 0) {
-        if (minutes === 0) {
-          return translate ? translate('duration.h', { h: hours }) : `${hours}h`
-        }
-        return translate ? translate('duration.hm', { h: hours, m: minutes }) : `${hours}h ${minutes}m`
-      }
-      if (minutes > 0) {
-        return translate ? translate('duration.m', { m: minutes }) : `${minutes}m`
-      }
-      const seconds = Math.floor(ms / 1000)
-      return translate ? translate('duration.s', { s: seconds }) : `${seconds}s`
-    }
-
     function formatClock(timestamp) {
       if (!timestamp) return '—'
       try {
         return new Date(timestamp).toLocaleTimeString()
       } catch (error) {
         return '—'
+      }
+    }
+
+    /**
+     * An absolute date and time in the reader's own time zone, e.g.
+     * "Nov 21, 14:20" or "11月21日 14:20". The year is added when the moment
+     * falls into another year, so a weekly window that ends next year stays
+     * unambiguous.
+     */
+    function formatDateTime(timestamp) {
+      if (timestamp === null || timestamp === undefined || !Number.isFinite(timestamp)) return '—'
+      const date = new Date(timestamp)
+      if (Number.isNaN(date.getTime())) return '—'
+      try {
+        const sameYear = date.getFullYear() === new Date().getFullYear()
+        const options = {
+          month: 'short',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false,
+        }
+        if (!sameYear) options.year = 'numeric'
+        return new Intl.DateTimeFormat(undefined, options).format(date)
+      } catch (error) {
+        return date.toISOString().slice(0, 16).replace('T', ' ')
       }
     }
 
@@ -462,8 +463,23 @@ window.__ModuleLoader__.load({
         && row.current_weekly_status === 3
     }
 
+    /**
+     * The absolute instant a window resets. The API reports the window end
+     * directly; the remaining duration is only a fallback for payloads that
+     * omit it. A countdown would keep ticking while the reset moment itself
+     * stands still, so the panel shows the instant instead.
+     */
+    function absoluteReset(endTime, remaining, fetchedAt) {
+      const end = numberOrNull(endTime)
+      if (end !== null && end > 0) return end
+      const left = numberOrNull(remaining)
+      if (left !== null && left >= 0) return fetchedAt + left
+      return null
+    }
+
     function buildSnapshot(payload) {
       const rows = Array.isArray(payload && payload.model_remains) ? payload.model_remains : []
+      const fetchedAt = Date.now()
       const models = rows.filter((row) => !isUnavailablePlan(row)).map((row) => {
         const intervalSpan = row.end_time > row.start_time ? row.end_time - row.start_time : null
         const weeklySpan = row.weekly_end_time > row.weekly_start_time ? row.weekly_end_time - row.weekly_start_time : null
@@ -485,11 +501,11 @@ window.__ModuleLoader__.load({
           }),
           intervalSpan,
           weeklySpan,
-          intervalResetAt: numberOrNull(row.remains_time),
-          weeklyResetAt: numberOrNull(row.weekly_remains_time),
+          intervalResetAt: absoluteReset(row.end_time, row.remains_time, fetchedAt),
+          weeklyResetAt: absoluteReset(row.weekly_end_time, row.weekly_remains_time, fetchedAt),
         }
       })
-      return { models, fetchedAt: Date.now() }
+      return { models, fetchedAt }
     }
 
     /**
@@ -1042,24 +1058,6 @@ button.mm-pill[aria-expanded='true']{background:var(--dsw-alias-interactive-bg-h
       }, [open, panelRef, triggerRef])
     }
 
-    /**
-     * The reset countdown keeps its own timer so the rest of the panel does
-     * not re-render every second.
-     */
-    function CountdownRow(props) {
-      const t = props.t
-      const [, setTick] = useState(0)
-      useEffect(() => {
-        const timer = setInterval(() => setTick((value) => value + 1), 1000)
-        return () => clearInterval(timer)
-      }, [])
-      const left = Math.max(0, props.remaining || 0)
-      return [
-        h('dt', { key: 'reset-label' }, t('panel.resetIn', { time: formatDuration(left, t) })),
-        h('dd', { key: 'reset-value' }, formatClock(Date.now() + left)),
-      ]
-    }
-
     function QuotaPanel(props) {
       const t = useTranslate(props)
       const idPrefix = props.idPrefix || 'mm'
@@ -1095,12 +1093,17 @@ button.mm-pill[aria-expanded='true']{background:var(--dsw-alias-interactive-bg-h
         return parts.join(' · ')
       }
 
-      function windowRow(label, picked) {
+      function windowRow(label, picked, resetLabel) {
         if (!picked) {
-          return [h('dt', { key: `${label}-label` }, label), h('dd', { key: `${label}-value` }, t('panel.noData'))]
+          return [
+            h('dt', { key: `${label}-label` }, label),
+            h('dd', { key: `${label}-value` }, t('panel.noData')),
+            h('dt', { key: `${label}-reset-label` }, resetLabel),
+            h('dd', { key: `${label}-reset-value` }, t('panel.noData')),
+          ]
         }
         const stats = picked.stats
-        const resetIn = picked.window === 'interval'
+        const resetAt = picked.window === 'interval'
           ? picked.model.intervalResetAt
           : picked.model.weeklyResetAt
         const note = picked.window === 'weekly' ? boostInline(stats, t) : ''
@@ -1109,10 +1112,11 @@ button.mm-pill[aria-expanded='true']{background:var(--dsw-alias-interactive-bg-h
           h('dd', { key: `${label}-value` }, readingText(stats), note
             ? h('span', { className: 'mm-note', key: `${label}-note` }, ` · ${note}`)
             : null),
+          // The reset moment is an absolute date, not a running countdown:
+          // the window ends at one instant and does not move.
+          h('dt', { key: `${label}-reset-label` }, resetLabel),
+          h('dd', { key: `${label}-reset-value` }, formatDateTime(resetAt)),
         ]
-        if (resetIn) {
-          rows.push(h(CountdownRow, { key: `${label}-reset`, remaining: resetIn, t }))
-        }
         return rows
       }
 
@@ -1177,8 +1181,8 @@ button.mm-pill[aria-expanded='true']{background:var(--dsw-alias-interactive-bg-h
       const details = []
       details.push(h('dt', { key: 'displayed-label' }, t('panel.displayed')))
       details.push(h('dd', { key: 'displayed-value' }, metricLabel))
-      details.push(...windowRow(t('panel.interval'), five))
-      details.push(...windowRow(t('panel.weekly'), week))
+      details.push(...windowRow(t('panel.interval'), five, t('panel.intervalReset')))
+      details.push(...windowRow(t('panel.weekly'), week, t('panel.weeklyReset')))
       details.push(h('dt', { key: 'model-label' }, t('panel.model')))
       details.push(h('dd', { key: 'model-value' }, entry && entry.model ? entry.model.name : t('panel.noData')))
       details.push(h('dt', { key: 'updated-label' }, t('panel.updatedAt')))
@@ -1467,7 +1471,8 @@ button.mm-pill[aria-expanded='true']{background:var(--dsw-alias-interactive-bg-h
         percentText,
         stateText,
         errorText,
-        formatDuration,
+        formatDateTime,
+        absoluteReset,
         clampPct,
         boostNote,
         boostInline,
