@@ -23,7 +23,7 @@ window.__ModuleLoader__.load({
     const React = require('react')
     const ReactDOM = require('react-dom')
     const h = React.createElement
-    const { useEffect, useMemo, useRef, useState, useSyncExternalStore } = React
+    const { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } = React
     const createPortal = ReactDOM.createPortal
 
     const NS = 'minimaxTokenPlan'
@@ -83,6 +83,8 @@ window.__ModuleLoader__.load({
       'panel.noAbsolute': '该套餐未提供绝对 token 数',
       'panel.unlimited': '无限',
       'panel.exhausted': '已用尽',
+      'panel.boostNote': '含 {factor}× 加成（基础 {base}）',
+      'panel.boostInline': '含 {factor}× 加成',
       'panel.noData': '暂无数据',
       'panel.refresh': '刷新',
       'panel.settings': '设置',
@@ -143,6 +145,8 @@ window.__ModuleLoader__.load({
       'panel.noAbsolute': 'This plan reports no absolute token counts',
       'panel.unlimited': 'Unlimited',
       'panel.exhausted': 'Exhausted',
+      'panel.boostNote': '{factor}× boost included (base {base})',
+      'panel.boostInline': '{factor}× boost',
       'panel.noData': 'No data',
       'panel.refresh': 'Refresh',
       'panel.settings': 'Settings',
@@ -417,17 +421,21 @@ window.__ModuleLoader__.load({
         unlimited: false,
         exhausted: false,
         percent: null,
+        basePercent: null,
+        boostFactor: 1,
         remaining: null,
         used: null,
         total: null,
       }
       if (options.status === 3) {
         stats.unlimited = true
+        stats.boostFactor = boostFactor
         return stats
       }
       if (options.status === 2) {
         stats.exhausted = true
         stats.percent = 0
+        stats.boostFactor = boostFactor
         return stats
       }
       const counts = resolveQuotaCounts(options.count, options.total, options.percent)
@@ -437,10 +445,13 @@ window.__ModuleLoader__.load({
         stats.total = counts.total
       }
       if (options.percent !== null && options.percent !== undefined && Number.isFinite(options.percent)) {
+        stats.basePercent = clampPct(options.percent)
         stats.percent = clampPct(options.percent * boostFactor)
       } else if (counts) {
-        stats.percent = clampPct((counts.remaining / counts.total) * 100 * boostFactor)
+        stats.basePercent = clampPct((counts.remaining / counts.total) * 100)
+        stats.percent = clampPct(stats.basePercent * boostFactor)
       }
+      stats.boostFactor = boostFactor
       return stats
     }
 
@@ -569,6 +580,30 @@ window.__ModuleLoader__.load({
       if (message === 'WEB_CRYPTO_UNAVAILABLE') return t('settings.error.crypto')
       if (message === 'VAULT_UNAVAILABLE') return t('settings.error.vault')
       return message
+    }
+
+    /**
+     * MiniMax grants some plans a multiplier on the weekly window, so the
+     * remaining share can read above 100 %. The boost is reported instead of
+     * hidden: the note names the multiplier and the underlying share.
+     */
+    function boostFactorText(stats) {
+      const factor = stats && stats.boostFactor ? stats.boostFactor : 1
+      if (Number.isInteger(factor)) return String(factor)
+      return factor.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')
+    }
+
+    function boostNote(stats, t) {
+      if (!stats || !(stats.boostFactor > 1)) return ''
+      const base = stats.basePercent !== null && stats.basePercent !== undefined
+        ? `${stats.basePercent}%`
+        : '—'
+      return t('panel.boostNote', { factor: boostFactorText(stats), base })
+    }
+
+    function boostInline(stats, t) {
+      if (!stats || !(stats.boostFactor > 1)) return ''
+      return t('panel.boostInline', { factor: boostFactorText(stats) })
     }
 
     /* ------------------------------------------------------------------ *
@@ -788,16 +823,13 @@ button.mm-pill[aria-expanded='true']{background:var(--dsw-alias-interactive-bg-h
 .mm-busy{color:var(--dsw-alias-label-caption)}
 .mm-error{color:var(--dsw-alias-state-error-primary)}
 .mm-warn{color:var(--dsw-alias-state-warn-primary)}
-.mm-tip{position:relative;display:inline-flex;min-width:0}
-.mm-tip::after{content:attr(data-tip);position:absolute;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%);z-index:1100;max-width:280px;padding:4px 8px;border-radius:var(--dsw-radius-sm);background:var(--dsw-alias-tooltip-bg);color:var(--dsw-alias-tooltip-label);font-size:11px;line-height:16px;text-align:left;white-space:normal;overflow-wrap:anywhere;opacity:0;pointer-events:none;transition:opacity .12s ease}
-.mm-tip:hover::after,.mm-tip:focus-within::after{opacity:1}
-.mm-tip-open::after{display:none}
+.mm-tooltip{position:fixed;z-index:1200;box-sizing:border-box;max-width:min(280px,calc(100vw - 24px));padding:4px 8px;border-radius:var(--dsw-radius-sm);background:var(--dsw-alias-tooltip-bg);color:var(--dsw-alias-tooltip-label);box-shadow:var(--dsw-elevation-prominent);font-size:11px;line-height:16px;text-align:left;white-space:normal;overflow-wrap:anywhere;pointer-events:none}
 .mm-panel{position:fixed;z-index:1100;box-sizing:border-box;width:max-content;min-width:min(300px,calc(100vw - 24px));max-width:min(440px,calc(100vw - 24px));padding:16px;border:0;border-radius:var(--dsw-radius-lg);background:var(--dsw-specific-menu);backdrop-filter:var(--dsw-menu-backdrop-filter);--dsw-elevation-stroke-color:var(--dsw-alias-border-l1);box-shadow:var(--dsw-elevation-prominent);font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary);cursor:default;max-height:calc(100dvh - 12px - max(12px,var(--dsh-frame-overlay-top,12px)));overflow-x:hidden;overflow-y:auto;--dsh-scrollbar-thumb:var(--dsw-alias-scrollbar-bg-l2);--dsh-scrollbar-thumb-hover:var(--dsw-alias-scrollbar-hover-l2);position-area:none;top:max(12px,var(--dsh-frame-overlay-top,12px));bottom:max(12px,calc(anchor(top) + 8px));left:max(12px,anchor(left));right:12px;position-try-fallbacks:--dsh-stat-window,--dsh-stat-opposite,--dsh-stat-wide-opposite,--dsh-stat-tall,--dsh-stat-viewport;align-self:end;justify-self:start;height:fit-content;min-height:0;margin:0}
 .mm-panel:focus{outline:none}
 .mm-title{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:8px;color:var(--dsw-alias-label-primary);font-weight:500}
 .mm-title-label{display:inline-flex;align-items:center;gap:6px;min-width:0}
 .mm-title-label svg{width:14px;height:14px;flex:none}
-.mm-title-value{font-variant-numeric:tabular-nums}
+.mm-title-value{display:flex;flex-direction:column;align-items:flex-end;gap:2px;font-variant-numeric:tabular-nums}
 .mm-rule{margin:8px 0;border-top:.5px solid var(--dsw-alias-border-l2)}
 .mm-details{display:grid;grid-template-columns:minmax(76px,auto) minmax(0,1fr);gap:6px 16px;margin:0;color:var(--dsw-alias-label-tertiary)}
 .mm-details dt,.mm-details dd{min-width:0;margin:0}
@@ -904,6 +936,48 @@ button.mm-pill[aria-expanded='true']{background:var(--dsw-alias-interactive-bg-h
         event.preventDefault()
         first.focus()
       }
+    }
+
+    /**
+     * A portaled tooltip.
+     *
+     * The pill lives in the narrow dock row, so a tooltip anchored to it as a
+     * pseudo element would be squeezed to the width of the label. The tooltip
+     * therefore lives in the document body and is placed from the trigger
+     * rectangle, the same way the host portals its own tooltips.
+     */
+    function useTooltip(text, disabled, triggerRef) {
+      const [rect, setRect] = useState(null)
+      const show = useCallback(() => {
+        if (disabled || !text) return
+        const element = triggerRef.current
+        if (!element || typeof element.getBoundingClientRect !== 'function') return
+        const box = element.getBoundingClientRect()
+        setRect({ top: box.top, left: box.left, width: box.width, height: box.height })
+      }, [disabled, text, triggerRef])
+      const hide = useCallback(() => setRect(null), [])
+
+      let tooltip = null
+      if (rect && text && !disabled) {
+        const above = rect.top > 48
+        const half = 140
+        const viewport = typeof window !== 'undefined' ? window.innerWidth : rect.left + rect.width
+        const center = rect.left + rect.width / 2
+        const left = Math.min(Math.max(center, half + 12), Math.max(half + 12, viewport - half - 12))
+        tooltip = createPortal(
+          h('div', {
+            className: 'mm-tooltip',
+            role: 'tooltip',
+            style: {
+              top: above ? rect.top - 8 : rect.top + rect.height + 8,
+              left,
+              transform: above ? 'translate(-50%, -100%)' : 'translate(-50%, 0)',
+            },
+          }, text),
+          document.body,
+        )
+      }
+      return { tooltip, show, hide }
     }
 
     function usePanelDismiss(open, setOpen, rootRef, panelRef, triggerRef) {
@@ -1029,9 +1103,12 @@ button.mm-pill[aria-expanded='true']{background:var(--dsw-alias-interactive-bg-h
         const resetIn = picked.window === 'interval'
           ? picked.model.intervalResetAt
           : picked.model.weeklyResetAt
+        const note = picked.window === 'weekly' ? boostInline(stats, t) : ''
         const rows = [
           h('dt', { key: `${label}-label` }, label),
-          h('dd', { key: `${label}-value` }, readingText(stats)),
+          h('dd', { key: `${label}-value` }, readingText(stats), note
+            ? h('span', { className: 'mm-note', key: `${label}-note` }, ` · ${note}`)
+            : null),
         ]
         if (resetIn) {
           rows.push(h(CountdownRow, { key: `${label}-reset`, remaining: resetIn, t }))
@@ -1088,9 +1165,12 @@ button.mm-pill[aria-expanded='true']{background:var(--dsw-alias-interactive-bg-h
 
       const children = []
 
+      const titleNote = entry ? boostNote(entry.stats, t) : ''
       children.push(h('div', { className: 'mm-title', key: 'title' },
         h('span', { className: 'mm-title-label' }, h(GaugeIcon, null), h('span', null, t('panel.title'))),
-        h('span', { className: 'mm-title-value' }, entry ? stateText(entry.stats, t) : t('pill.idle'))))
+        h('span', { className: 'mm-title-value' },
+          h('span', { key: 'value' }, entry ? stateText(entry.stats, t) : t('pill.idle')),
+          titleNote ? h('span', { className: 'mm-note', key: 'note' }, titleNote) : null)))
 
       children.push(h('div', { className: 'mm-rule', key: 'rule-1' }))
 
@@ -1127,6 +1207,10 @@ button.mm-pill[aria-expanded='true']{background:var(--dsw-alias-interactive-bg-h
           cells.push(h('span', { key: `w${index}` }, readingText(model.weekly)))
         })
         children.push(h('div', { className: 'mm-table', key: 'models' }, cells))
+        const boosted = snapshot.models.find((model) => model.weekly && model.weekly.boostFactor > 1)
+        if (boosted) {
+          children.push(h('p', { className: 'mm-note', key: 'boost-note' }, boostNote(boosted.weekly, t)))
+        }
         const hasAbsolute = snapshot.models.some((model) => model.interval.remaining !== null || model.weekly.remaining !== null)
         if (!hasAbsolute) {
           children.push(h('p', { className: 'mm-note', key: 'no-absolute' }, t('panel.noAbsolute')))
@@ -1307,27 +1391,37 @@ button.mm-pill[aria-expanded='true']{background:var(--dsw-alias-interactive-bg-h
       } else if (entry) {
         label = stateText(entry.stats, t)
         tip = t('pill.tip.ready', { metric: metricLabel, value: label })
+        // A boosted window reads above 100 %; the tooltip names the boost so
+        // the number never looks like a bug.
+        const note = boostNote(entry.stats, t)
+        if (note) tip = `${tip} · ${note}`
         // The low band carries a warning glyph as well as a colour, and the
         // healthy band keeps the resting colour, so the state is never
         // encoded in colour alone.
         if (entry.stats.exhausted || (entry.stats.percent !== null && entry.stats.percent <= 20)) tone = 'mm-warn'
       }
 
+      const tooltip = useTooltip(tip, open, triggerRef)
+
       return h('span', { className: 'mm-root', key: 'root' },
         h('span', { ref: rootRef, style: { anchorName }, className: 'mm-anchor', 'data-composer-stat': SLOT_ID, key: 'anchor' },
-          h('span', { className: `mm-tip${open ? ' mm-tip-open' : ''}`, 'data-tip': tip, key: 'tip' },
-            h('button', {
-              ref: triggerRef,
-              type: 'button',
-              className: `mm-pill ${tone}`.trim(),
-              'aria-haspopup': 'dialog',
-              'aria-expanded': open,
-              'aria-controls': panelId,
-              'aria-label': `${label} · ${tip}`,
-              onClick: () => setOpen((value) => !value),
-            },
-            h(GaugeIcon, null),
-            h('span', { className: 'mm-label' }, label))),
+          h('button', {
+            ref: triggerRef,
+            type: 'button',
+            className: `mm-pill ${tone}`.trim(),
+            'aria-haspopup': 'dialog',
+            'aria-expanded': open,
+            'aria-controls': panelId,
+            'aria-label': `${label} · ${tip}`,
+            onClick: () => setOpen((value) => !value),
+            onMouseEnter: tooltip.show,
+            onMouseLeave: tooltip.hide,
+            onFocus: tooltip.show,
+            onBlur: tooltip.hide,
+          },
+          h(GaugeIcon, null),
+          h('span', { className: 'mm-label' }, label)),
+          tooltip.tooltip,
           open && createPortal(
             h(QuotaPanel, { panelRef, t, idPrefix: anchorId.current, anchorName, panelId }),
             document.body,
@@ -1375,6 +1469,9 @@ button.mm-pill[aria-expanded='true']{background:var(--dsw-alias-interactive-bg-h
         errorText,
         formatDuration,
         clampPct,
+        boostNote,
+        boostInline,
+        boostFactorText,
       }
     }
     return plugin

@@ -75,6 +75,14 @@ Open the pill → **设置 / Settings**:
 > plans expose absolute counts. When the plan reports no absolute counts the
 > "absolute lowest" metric shows `—` and the panel says so.
 
+> **Why the weekly number can exceed 100 %:** MiniMax grants some plans a
+> multiplier on the weekly window (`weekly_boost_permille`, e.g. `1500` = 1.5×).
+> The remaining share is then reported against the boosted allowance, so
+> `76 % × 1.5 = 114 %`. The plugin keeps that number — like the official
+> `mmx quota` command does — and names the multiplier next to it
+> (`含 1.5× 加成（基础 76%）` / `1.5× boost included (base 76%)`), so it never
+> looks like a broken percentage.
+
 ## How it works
 
 - The quota comes from the official endpoint
@@ -83,7 +91,8 @@ Open the pill → **设置 / Settings**:
   (remaining vs. consumed). The plugin disambiguates them with the server
   percentage, exactly like the official `mmx quota` command does.
 - The weekly percentage is boosted with `weekly_boost_permille` when the plan
-  reports one, so a boosted plan can show more than 100%.
+  reports one, so a boosted plan can show more than 100% — the panel names the
+  multiplier next to the reading.
 
 ## Privacy
 
@@ -115,5 +124,10 @@ Open the pill → **设置 / Settings**:
 
 > 套餐决定能显示哪些数字：文本套餐通常只提供百分比，图像/视频套餐才提供绝对
 > 次数；当套餐不提供绝对次数时，“绝对 token 最低”显示 `—`。
+
+> **为什么周剩余会超过 100%：** MiniMax 会给部分套餐的周窗口一个倍率
+> （`weekly_boost_permille`，如 `1500` 表示 1.5×）。剩余比例是按加成后的额度
+> 计算的，于是 `76% × 1.5 = 114%`。插件保留这个数字（与官方 `mmx quota` 一致），
+> 并在旁边标注倍率（`含 1.5× 加成（基础 76%）`），避免看起来像百分比出错。
 
 许可证：[MIT](LICENSE)
