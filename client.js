@@ -23,7 +23,7 @@ window.__ModuleLoader__.load({
     const React = require('react')
     const ReactDOM = require('react-dom')
     const h = React.createElement
-    const { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } = React
+    const { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } = React
     const createPortal = ReactDOM.createPortal
 
     const NS = 'minimaxTokenPlan'
@@ -56,6 +56,8 @@ window.__ModuleLoader__.load({
     // above anything the API can report so a boosted reading is never shown as
     // a round number it is not.
     const MAX_DISPLAY_PCT = 1000
+    // The host shows its own tooltips after a short delay; the pill follows.
+    const TOOLTIP_DELAY_MS = 180
 
     /* ------------------------------------------------------------------ *
      * Dictionaries
@@ -84,7 +86,7 @@ window.__ModuleLoader__.load({
       'panel.noAbsolute': '该套餐未提供绝对 token 数',
       'panel.unlimited': '无限',
       'panel.exhausted': '已用尽',
-      'panel.boostNote': '含 {factor}× 加成（基础 {base}）',
+      'panel.boostNote': '含 {factor}× 加成（未加成剩余 {base}）',
       'panel.boostInline': '含 {factor}× 加成',
       'panel.noData': '暂无数据',
       'panel.refresh': '刷新',
@@ -143,7 +145,7 @@ window.__ModuleLoader__.load({
       'panel.noAbsolute': 'This plan reports no absolute token counts',
       'panel.unlimited': 'Unlimited',
       'panel.exhausted': 'Exhausted',
-      'panel.boostNote': '{factor}× boost included (base {base})',
+      'panel.boostNote': '{factor}× boost included ({base} before the boost)',
       'panel.boostInline': '{factor}× boost',
       'panel.noData': 'No data',
       'panel.refresh': 'Refresh',
@@ -611,10 +613,11 @@ window.__ModuleLoader__.load({
 
     function boostNote(stats, t) {
       if (!stats || !(stats.boostFactor > 1)) return ''
-      const base = stats.basePercent !== null && stats.basePercent !== undefined
-        ? `${stats.basePercent}%`
-        : '—'
-      return t('panel.boostNote', { factor: boostFactorText(stats), base })
+      // An unlimited or exhausted window has no share to explain, and a
+      // missing base percentage would print a meaningless dash.
+      if (stats.unlimited || stats.exhausted) return ''
+      if (stats.basePercent === null || stats.basePercent === undefined) return ''
+      return t('panel.boostNote', { factor: boostFactorText(stats), base: `${stats.basePercent}%` })
     }
 
     function boostInline(stats, t) {
@@ -955,45 +958,155 @@ button.mm-pill[aria-expanded='true']{background:var(--dsw-alias-interactive-bg-h
     }
 
     /**
+     * Where a fixed tooltip box goes, given the trigger rectangle, the
+     * measured size of the box and the visible viewport.
+     *
+     * The box prefers the space above the trigger, flips to the roomier side
+     * when it does not fit, and is clamped so it never leaves the viewport.
+     */
+    function placeTooltip(rect, size, viewport) {
+      const margin = 8
+      const gap = 8
+      const boxWidth = size ? size.width : 0
+      const boxHeight = size ? size.height : 0
+      const center = rect.left + rect.width / 2
+
+      const roomAbove = rect.top - gap - margin
+      const roomBelow = viewport.height - (rect.top + rect.height + gap) - margin
+      const above = roomAbove >= boxHeight || roomAbove >= roomBelow
+
+      let top
+      let transform
+      if (above) {
+        // The box hangs above its anchor, so its top edge is the limit.
+        top = Math.max(rect.top - gap, boxHeight + margin)
+        transform = 'translate(-50%, -100%)'
+      } else {
+        top = Math.min(
+          rect.top + rect.height + gap,
+          Math.max(margin, viewport.height - boxHeight - margin),
+        )
+        transform = 'translate(-50%, 0)'
+      }
+
+      // Keep the box inside the visible width; the client width excludes the
+      // classic scrollbar, so the box never hides behind it.
+      let left = center
+      if (boxWidth) {
+        const half = Math.min(boxWidth / 2, Math.max(0, viewport.width / 2 - margin))
+        const lower = half + margin
+        const upper = Math.max(lower, viewport.width - half - margin)
+        left = Math.min(Math.max(center, lower), upper)
+      }
+      return { top, left, transform, above }
+    }
+
+    /**
      * A portaled tooltip.
      *
      * The pill lives in the narrow dock row, so a tooltip anchored to it as a
      * pseudo element would be squeezed to the width of the label. The tooltip
      * therefore lives in the document body and is placed from the trigger
      * rectangle, the same way the host portals its own tooltips.
+     *
+     * The rendered box is measured, so the placement can never push the
+     * tooltip off the viewport, and the tooltip is associated with the trigger
+     * through `aria-describedby`.
      */
-    function useTooltip(text, disabled, triggerRef) {
+    function useTooltip(text, disabled, triggerRef, tooltipId) {
       const [rect, setRect] = useState(null)
+      const [size, setSize] = useState(null)
+      const boxRef = useRef(null)
+      const timerRef = useRef(null)
+
+      const hide = useCallback(() => {
+        if (timerRef.current) {
+          clearTimeout(timerRef.current)
+          timerRef.current = null
+        }
+        setRect(null)
+      }, [])
+
       const show = useCallback(() => {
         if (disabled || !text) return
         const element = triggerRef.current
         if (!element || typeof element.getBoundingClientRect !== 'function') return
         const box = element.getBoundingClientRect()
-        setRect({ top: box.top, left: box.left, width: box.width, height: box.height })
+        if (timerRef.current) clearTimeout(timerRef.current)
+        // The host shows its own tooltips after a short delay; matching that
+        // keeps the dock row calm when the pointer crosses it.
+        timerRef.current = setTimeout(() => {
+          timerRef.current = null
+          setRect({ top: box.top, left: box.left, width: box.width, height: box.height })
+        }, TOOLTIP_DELAY_MS)
       }, [disabled, text, triggerRef])
-      const hide = useCallback(() => setRect(null), [])
+
+      // A tooltip that is disabled (the panel is open) must not survive.
+      useEffect(() => {
+        if (!disabled) return undefined
+        if (timerRef.current) {
+          clearTimeout(timerRef.current)
+          timerRef.current = null
+        }
+        setRect(null)
+        return undefined
+      }, [disabled])
+
+      useEffect(() => () => {
+        if (timerRef.current) clearTimeout(timerRef.current)
+      }, [])
+
+      // Measure the rendered box: the CSS owns the maximum width, the
+      // measurement owns the placement.
+      useLayoutEffect(() => {
+        const element = boxRef.current
+        if (!element) return
+        const width = element.offsetWidth
+        const height = element.offsetHeight
+        if (!width || !height) return
+        setSize((current) => {
+          if (current && current.width === width && current.height === height) return current
+          return { width, height }
+        })
+      }, [rect, text])
+
+      // Follow the trigger while the page moves under the pointer.
+      useEffect(() => {
+        if (!rect) return undefined
+        function reposition() {
+          const element = triggerRef.current
+          if (!element) return
+          const box = element.getBoundingClientRect()
+          setRect({ top: box.top, left: box.left, width: box.width, height: box.height })
+        }
+        window.addEventListener('resize', reposition)
+        window.addEventListener('scroll', reposition, true)
+        return () => {
+          window.removeEventListener('resize', reposition)
+          window.removeEventListener('scroll', reposition, true)
+        }
+      }, [rect, triggerRef])
 
       let tooltip = null
       if (rect && text && !disabled) {
-        const above = rect.top > 48
-        const half = 140
-        const viewport = typeof window !== 'undefined' ? window.innerWidth : rect.left + rect.width
-        const center = rect.left + rect.width / 2
-        const left = Math.min(Math.max(center, half + 12), Math.max(half + 12, viewport - half - 12))
+        const viewport = {
+          width: document.documentElement.clientWidth || window.innerWidth,
+          height: document.documentElement.clientHeight || window.innerHeight,
+        }
+        const place = placeTooltip(rect, size, viewport)
+
         tooltip = createPortal(
           h('div', {
+            ref: boxRef,
             className: 'mm-tooltip',
+            id: tooltipId,
             role: 'tooltip',
-            style: {
-              top: above ? rect.top - 8 : rect.top + rect.height + 8,
-              left,
-              transform: above ? 'translate(-50%, -100%)' : 'translate(-50%, 0)',
-            },
+            style: { top: place.top, left: place.left, transform: place.transform },
           }, text),
           document.body,
         )
       }
-      return { tooltip, show, hide }
+      return { tooltip, show, hide, describedBy: tooltip ? tooltipId : undefined }
     }
 
     function usePanelDismiss(open, setOpen, rootRef, panelRef, triggerRef) {
@@ -1208,13 +1321,14 @@ button.mm-pill[aria-expanded='true']{background:var(--dsw-alias-interactive-bg-h
         snapshot.models.forEach((model, index) => {
           cells.push(h('span', { className: 'mm-name', key: `n${index}`, title: model.name }, model.name))
           cells.push(h('span', { key: `i${index}` }, readingText(model.interval)))
-          cells.push(h('span', { key: `w${index}` }, readingText(model.weekly)))
+          // Every row carries its own boost marker, so a table with two
+          // boosted models never explains only the first one.
+          const weeklyNote = boostInline(model.weekly, t)
+          cells.push(h('span', { key: `w${index}` }, readingText(model.weekly), weeklyNote
+            ? h('span', { className: 'mm-note', key: `wn${index}` }, ` · ${weeklyNote}`)
+            : null))
         })
         children.push(h('div', { className: 'mm-table', key: 'models' }, cells))
-        const boosted = snapshot.models.find((model) => model.weekly && model.weekly.boostFactor > 1)
-        if (boosted) {
-          children.push(h('p', { className: 'mm-note', key: 'boost-note' }, boostNote(boosted.weekly, t)))
-        }
         const hasAbsolute = snapshot.models.some((model) => model.interval.remaining !== null || model.weekly.remaining !== null)
         if (!hasAbsolute) {
           children.push(h('p', { className: 'mm-note', key: 'no-absolute' }, t('panel.noAbsolute')))
@@ -1405,7 +1519,8 @@ button.mm-pill[aria-expanded='true']{background:var(--dsw-alias-interactive-bg-h
         if (entry.stats.exhausted || (entry.stats.percent !== null && entry.stats.percent <= 20)) tone = 'mm-warn'
       }
 
-      const tooltip = useTooltip(tip, open, triggerRef)
+      const tooltipId = `${anchorId.current}-tip`
+      const tooltip = useTooltip(tip, open, triggerRef, tooltipId)
 
       return h('span', { className: 'mm-root', key: 'root' },
         h('span', { ref: rootRef, style: { anchorName }, className: 'mm-anchor', 'data-composer-stat': SLOT_ID, key: 'anchor' },
@@ -1416,7 +1531,10 @@ button.mm-pill[aria-expanded='true']{background:var(--dsw-alias-interactive-bg-h
             'aria-haspopup': 'dialog',
             'aria-expanded': open,
             'aria-controls': panelId,
-            'aria-label': `${label} · ${tip}`,
+            // The accessible name carries the visible label; the tooltip is
+            // the description, so the reading is never announced twice.
+            'aria-label': label,
+            'aria-describedby': tooltip.describedBy,
             onClick: () => setOpen((value) => !value),
             onMouseEnter: tooltip.show,
             onMouseLeave: tooltip.hide,
@@ -1473,6 +1591,7 @@ button.mm-pill[aria-expanded='true']{background:var(--dsw-alias-interactive-bg-h
         errorText,
         formatDateTime,
         absoluteReset,
+        placeTooltip,
         clampPct,
         boostNote,
         boostInline,

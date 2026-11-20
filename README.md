@@ -81,8 +81,8 @@ Open the pill → **设置 / Settings**:
 > The remaining share is then reported against the boosted allowance, so
 > `76 % × 1.5 = 114 %`. The plugin keeps that number — like the official
 > `mmx quota` command does — and names the multiplier next to it
-> (`含 1.5× 加成（基础 76%）` / `1.5× boost included (base 76%)`), so it never
-> looks like a broken percentage.
+> (`含 1.5× 加成（未加成剩余 76%）` / `1.5× boost included (76% before the boost)`),
+> so it never looks like a broken percentage.
 
 ## How it works
 
@@ -129,6 +129,6 @@ Open the pill → **设置 / Settings**:
 > **为什么周剩余会超过 100%：** MiniMax 会给部分套餐的周窗口一个倍率
 > （`weekly_boost_permille`，如 `1500` 表示 1.5×）。剩余比例是按加成后的额度
 > 计算的，于是 `76% × 1.5 = 114%`。插件保留这个数字（与官方 `mmx quota` 一致），
-> 并在旁边标注倍率（`含 1.5× 加成（基础 76%）`），避免看起来像百分比出错。
+> 并在旁边标注倍率（`含 1.5× 加成（未加成剩余 76%）`），避免看起来像百分比出错。
 
 许可证：[MIT](LICENSE)
