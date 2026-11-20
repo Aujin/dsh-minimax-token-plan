@@ -1,0 +1,51 @@
+{
+  "name": "dsh-minimax-token-plan",
+  "version": "1.0.0",
+  "description": "Show the MiniMax Token Plan remaining quota (5-hour and weekly windows) in the DeepSeek Harness composer dock",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    "LICENSE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Aujin/dsh-minimax-token-plan.git"
+  },
+  "homepage": "https://github.com/Aujin/dsh-minimax-token-plan#readme",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "minimax",
+    "token-plan",
+    "quota",
+    "m-plan"
+  ],
+  "engines": {
+    "dsh": ">=0.2.0"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ]
+    }
+  }
+}

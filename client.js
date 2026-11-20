@@ -1,0 +1,1122 @@
+/* eslint-disable no-undef */
+/**
+ * dsh-minimax-token-plan — browser half.
+ *
+ * Renders a MiniMax Token Plan indicator inside the DeepSeek Harness composer
+ * dock (between the "token 用量" pill and the "上下文已用" ring):
+ *
+ *   - the pill shows the configured metric (5-hour remaining by default),
+ *   - clicking it opens a panel with the 5-hour and weekly windows, per-model
+ *     detail and the settings (API key / region / default metric / interval),
+ *   - the API key is encrypted with a non-extractable AES-256-GCM key and kept
+ *     in IndexedDB, never in the plugin configuration and never in a log,
+ *   - requests only ever go to the official MiniMax hosts.
+ *
+ * The file is a classic script: it registers a factory for the browser module
+ * table and must not use ESM `import` statements.
+ */
+window.__ModuleLoader__.load({
+  id: 'dsh-minimax-token-plan',
+  factory(require) {
+    'use strict'
+
+    const React = require('react')
+    const ReactDOM = require('react-dom')
+    const h = React.createElement
+    const { useEffect, useMemo, useRef, useState, useSyncExternalStore } = React
+    const createPortal = ReactDOM.createPortal
+
+    const NS = 'minimaxTokenPlan'
+    const SLOT_ID = 'minimax-token-plan'
+
+    /* ------------------------------------------------------------------ *
+     * Constants
+     * ------------------------------------------------------------------ */
+
+    const REGION_BASE = {
+      global: 'https://api.minimax.io',
+      cn: 'https://api.minimax.cn',
+    }
+    const QUOTA_PATH = '/v1/token_plan/remains'
+
+    const DB_NAME = 'dsh-minimax-token-plan'
+    const DB_VERSION = 1
+    const DB_STORE = 'kv'
+    const DB_KEY_PREFS = 'prefs'
+    const DB_KEY_SECRET = 'apiKey'
+    const DB_KEY_DATA_KEY = 'dataKey'
+
+    const METRIC_IDS = ['interval', 'weekly', 'lowestAbsolute', 'lowestPercent']
+    const DEFAULT_PREFS = { metric: 'interval', region: 'auto', refreshMinutes: 5 }
+    const TICK_MS = 30000
+    const HOUR_MS = 3600000
+    const FIVE_HOURS_MIN_MS = 4.5 * HOUR_MS
+    const FIVE_HOURS_MAX_MS = 5.5 * HOUR_MS
+    const MAX_DISPLAY_PCT = 200
+
+    /* ------------------------------------------------------------------ *
+     * Dictionaries
+     * ------------------------------------------------------------------ */
+
+    const ZH = {
+      'pill.unconfigured': '未配置',
+      'pill.loading': '查询中',
+      'pill.error': '查询失败',
+      'pill.idle': '—',
+      'pill.tip.ready': 'MiniMax {metric}：{value}',
+      'pill.tip.unconfigured': '尚未配置 MiniMax API Key，点击打开设置',
+      'pill.tip.loading': '正在查询 MiniMax 套餐用量…',
+      'pill.tip.error': '查询 MiniMax 套餐用量失败：{message}',
+      'pill.tip.none': 'MiniMax 套餐用量：暂无数据',
+      'panel.title': 'MiniMax Token Plan',
+      'panel.interval': '5 小时剩余',
+      'panel.weekly': '周剩余',
+      'panel.displayed': '当前显示',
+      'panel.remaining': '剩余',
+      'panel.used': '已用',
+      'panel.total': '总量',
+      'panel.resetIn': '{time} 后重置',
+      'panel.updatedAt': '更新于 {time}',
+      'panel.models': '模型明细',
+      'panel.model': '模型',
+      'panel.noAbsolute': '该套餐未提供绝对 token 数',
+      'panel.unlimited': '无限',
+      'panel.exhausted': '已用尽',
+      'panel.noData': '暂无数据',
+      'panel.refresh': '刷新',
+      'panel.settings': '设置',
+      'panel.close': '关闭',
+      'settings.apiKey': 'API Key',
+      'settings.apiKeyHint': 'MiniMax M Plan Key（sk-cp- 开头），仅保存在本机。',
+      'settings.apiKeyPlaceholder': 'sk-cp-…',
+      'settings.save': '保存',
+      'settings.saving': '保存中',
+      'settings.clear': '清除',
+      'settings.saved': '已加密保存',
+      'settings.cleared': '已清除',
+      'settings.error.empty': '请输入 API Key',
+      'settings.error.failed': '保存失败：{message}',
+      'settings.error.crypto': '当前环境不支持 WebCrypto，无法加密保存密钥',
+      'settings.region': '服务区域',
+      'settings.region.auto': '自动检测',
+      'settings.region.global': '国际 api.minimax.io',
+      'settings.region.cn': '中国 api.minimax.cn',
+      'settings.metric': '默认显示',
+      'settings.metric.interval': '5 小时剩余',
+      'settings.metric.weekly': '周剩余',
+      'settings.metric.lowestAbsolute': '绝对 token 最低',
+      'settings.metric.lowestPercent': '百分比最低',
+      'settings.refreshMinutes': '刷新间隔（分钟）',
+      'settings.security': 'API Key 使用 AES-256-GCM 加密后保存在本机 IndexedDB，密钥不可导出；请求只发往 MiniMax 官方域名。',
+      'settings.keyPresent': '已保存 API Key（已加密）',
+      'settings.keyMissing': '尚未保存 API Key',
+      'metric.interval': '5 小时剩余',
+      'metric.weekly': '周剩余',
+      'metric.lowestAbsolute': '绝对 token 最低',
+      'metric.lowestPercent': '百分比最低',
+    }
+
+    const EN = {
+      'pill.unconfigured': 'Not configured',
+      'pill.loading': 'Loading',
+      'pill.error': 'Failed',
+      'pill.idle': '—',
+      'pill.tip.ready': 'MiniMax {metric}: {value}',
+      'pill.tip.unconfigured': 'No MiniMax API key yet — click to open settings',
+      'pill.tip.loading': 'Querying MiniMax plan usage…',
+      'pill.tip.error': 'Could not query MiniMax plan usage: {message}',
+      'pill.tip.none': 'MiniMax plan usage: no data',
+      'panel.title': 'MiniMax Token Plan',
+      'panel.interval': '5-hour remaining',
+      'panel.weekly': 'Weekly remaining',
+      'panel.displayed': 'Showing',
+      'panel.remaining': 'Remaining',
+      'panel.used': 'Used',
+      'panel.total': 'Total',
+      'panel.resetIn': 'resets in {time}',
+      'panel.updatedAt': 'Updated {time}',
+      'panel.models': 'Models',
+      'panel.model': 'Model',
+      'panel.noAbsolute': 'This plan reports no absolute token counts',
+      'panel.unlimited': 'Unlimited',
+      'panel.exhausted': 'Exhausted',
+      'panel.noData': 'No data',
+      'panel.refresh': 'Refresh',
+      'panel.settings': 'Settings',
+      'panel.close': 'Close',
+      'settings.apiKey': 'API key',
+      'settings.apiKeyHint': 'MiniMax M Plan key (starts with sk-cp-), stored on this machine only.',
+      'settings.apiKeyPlaceholder': 'sk-cp-…',
+      'settings.save': 'Save',
+      'settings.saving': 'Saving',
+      'settings.clear': 'Clear',
+      'settings.saved': 'Encrypted and saved',
+      'settings.cleared': 'Cleared',
+      'settings.error.empty': 'Please enter an API key',
+      'settings.error.failed': 'Could not save: {message}',
+      'settings.error.crypto': 'WebCrypto is unavailable here, so the key cannot be stored encrypted',
+      'settings.region': 'Service region',
+      'settings.region.auto': 'Detect automatically',
+      'settings.region.global': 'Global api.minimax.io',
+      'settings.region.cn': 'China api.minimax.cn',
+      'settings.metric': 'Default metric',
+      'settings.metric.interval': '5-hour remaining',
+      'settings.metric.weekly': 'Weekly remaining',
+      'settings.metric.lowestAbsolute': 'Lowest absolute tokens',
+      'settings.metric.lowestPercent': 'Lowest percentage',
+      'settings.refreshMinutes': 'Refresh interval (minutes)',
+      'settings.security': 'The API key is encrypted with AES-256-GCM and stored in the local IndexedDB; the key itself is non-extractable. Requests only reach the official MiniMax hosts.',
+      'settings.keyPresent': 'API key saved (encrypted)',
+      'settings.keyMissing': 'No API key saved yet',
+      'metric.interval': '5-hour remaining',
+      'metric.weekly': 'Weekly remaining',
+      'metric.lowestAbsolute': 'Lowest absolute tokens',
+      'metric.lowestPercent': 'Lowest percentage',
+    }
+
+    /* ------------------------------------------------------------------ *
+     * Small helpers
+     * ------------------------------------------------------------------ */
+
+    function messageOf(error) {
+      if (!error) return 'unknown error'
+      if (typeof error === 'string') return error
+      if (error.message) return String(error.message)
+      return String(error)
+    }
+
+    function clampPct(value) {
+      if (!Number.isFinite(value)) return null
+      return Math.max(0, Math.min(MAX_DISPLAY_PCT, Math.round(value)))
+    }
+
+    function numberOrNull(value) {
+      return typeof value === 'number' && Number.isFinite(value) ? value : null
+    }
+
+    function formatCount(value) {
+      if (value === null || value === undefined || !Number.isFinite(value)) return '—'
+      return Math.round(value).toLocaleString('en-US')
+    }
+
+    function formatDuration(ms) {
+      if (ms === null || ms === undefined || !Number.isFinite(ms) || ms < 0) return '—'
+      const totalMinutes = Math.floor(ms / 60000)
+      const hours = Math.floor(totalMinutes / 60)
+      const minutes = totalMinutes % 60
+      if (hours > 0) return `${hours}h ${minutes}m`
+      if (minutes > 0) return `${minutes}m`
+      return `${Math.floor(ms / 1000)}s`
+    }
+
+    function formatClock(timestamp) {
+      if (!timestamp) return '—'
+      try {
+        return new Date(timestamp).toLocaleTimeString()
+      } catch (error) {
+        return '—'
+      }
+    }
+
+    function toBase64(buffer) {
+      const bytes = new Uint8Array(buffer)
+      let binary = ''
+      for (let index = 0; index < bytes.length; index += 1) {
+        binary += String.fromCharCode(bytes[index])
+      }
+      return btoa(binary)
+    }
+
+    function fromBase64(text) {
+      const binary = atob(text)
+      const bytes = new Uint8Array(binary.length)
+      for (let index = 0; index < binary.length; index += 1) {
+        bytes[index] = binary.charCodeAt(index)
+      }
+      return bytes
+    }
+
+    /* ------------------------------------------------------------------ *
+     * IndexedDB vault
+     * ------------------------------------------------------------------ */
+
+    function openDatabase() {
+      return new Promise((resolve, reject) => {
+        if (typeof indexedDB === 'undefined') {
+          reject(new Error('IndexedDB is unavailable'))
+          return
+        }
+        const request = indexedDB.open(DB_NAME, DB_VERSION)
+        request.onupgradeneeded = () => {
+          const database = request.result
+          if (!database.objectStoreNames.contains(DB_STORE)) {
+            database.createObjectStore(DB_STORE)
+          }
+        }
+        request.onsuccess = () => resolve(request.result)
+        request.onerror = () => reject(request.error || new Error('IndexedDB open failed'))
+      })
+    }
+
+    function databaseGet(database, key) {
+      return new Promise((resolve, reject) => {
+        const request = database.transaction(DB_STORE, 'readonly').objectStore(DB_STORE).get(key)
+        request.onsuccess = () => resolve(request.result)
+        request.onerror = () => reject(request.error || new Error('IndexedDB read failed'))
+      })
+    }
+
+    function databasePut(database, key, value) {
+      return new Promise((resolve, reject) => {
+        const transaction = database.transaction(DB_STORE, 'readwrite')
+        transaction.objectStore(DB_STORE).put(value, key)
+        transaction.oncomplete = () => resolve(undefined)
+        transaction.onerror = () => reject(transaction.error || new Error('IndexedDB write failed'))
+      })
+    }
+
+    function databaseDelete(database, key) {
+      return new Promise((resolve, reject) => {
+        const transaction = database.transaction(DB_STORE, 'readwrite')
+        transaction.objectStore(DB_STORE).delete(key)
+        transaction.oncomplete = () => resolve(undefined)
+        transaction.onerror = () => reject(transaction.error || new Error('IndexedDB delete failed'))
+      })
+    }
+
+    function cryptoAvailable() {
+      return typeof crypto !== 'undefined' && !!crypto.subtle && typeof crypto.getRandomValues === 'function'
+    }
+
+    /** The data key is generated once, never extractable, and never leaves IndexedDB. */
+    async function loadDataKey(database) {
+      let key = await databaseGet(database, DB_KEY_DATA_KEY)
+      if (!key) {
+        key = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt'])
+        await databasePut(database, DB_KEY_DATA_KEY, key)
+      }
+      return key
+    }
+
+    async function encryptSecret(plain) {
+      if (!cryptoAvailable()) throw new Error('WEB_CRYPTO_UNAVAILABLE')
+      const database = await openDatabase()
+      try {
+        const key = await loadDataKey(database)
+        const iv = crypto.getRandomValues(new Uint8Array(12))
+        const cipher = await crypto.subtle.encrypt(
+          { name: 'AES-GCM', iv },
+          key,
+          new TextEncoder().encode(plain),
+        )
+        await databasePut(database, DB_KEY_SECRET, { v: 1, iv: toBase64(iv), data: toBase64(cipher) })
+      } finally {
+        database.close()
+      }
+    }
+
+    async function decryptSecret() {
+      const database = await openDatabase()
+      try {
+        const blob = await databaseGet(database, DB_KEY_SECRET)
+        if (!blob || !blob.iv || !blob.data) return null
+        const key = await loadDataKey(database)
+        const plain = await crypto.subtle.decrypt(
+          { name: 'AES-GCM', iv: fromBase64(blob.iv) },
+          key,
+          fromBase64(blob.data),
+        )
+        return new TextDecoder().decode(plain)
+      } finally {
+        database.close()
+      }
+    }
+
+    async function clearSecret() {
+      const database = await openDatabase()
+      try {
+        await databaseDelete(database, DB_KEY_SECRET)
+      } finally {
+        database.close()
+      }
+    }
+
+    async function readPrefs() {
+      const database = await openDatabase()
+      try {
+        const prefs = await databaseGet(database, DB_KEY_PREFS)
+        return prefs && typeof prefs === 'object' ? prefs : null
+      } finally {
+        database.close()
+      }
+    }
+
+    async function writePrefs(prefs) {
+      const database = await openDatabase()
+      try {
+        await databasePut(database, DB_KEY_PREFS, prefs)
+      } finally {
+        database.close()
+      }
+    }
+
+    /* ------------------------------------------------------------------ *
+     * MiniMax quota API
+     * ------------------------------------------------------------------ */
+
+    /**
+     * `*_usage_count` is ambiguous across MiniMax server versions: older
+     * payloads report the REMAINING count, newer ones the CONSUMED count.
+     * The server percentage disambiguates; without it we assume the legacy
+     * meaning. Mirrors the official `mmx quota` implementation.
+     */
+    function resolveQuotaCounts(reportedCount, total, remainingPercent) {
+      if (!Number.isFinite(reportedCount) || !Number.isFinite(total)) return undefined
+      if (total <= 0 || reportedCount < 0 || reportedCount > total) return undefined
+      if (remainingPercent === null || remainingPercent === undefined || !Number.isFinite(remainingPercent)) {
+        return { used: total - reportedCount, remaining: reportedCount, total }
+      }
+      const asRemaining = (reportedCount / total) * 100
+      const asUsed = ((total - reportedCount) / total) * 100
+      const remainingDistance = Math.abs(asRemaining - remainingPercent)
+      const usedDistance = Math.abs(asUsed - remainingPercent)
+      if (Math.min(remainingDistance, usedDistance) > 1) return undefined
+      const remaining = usedDistance < remainingDistance ? total - reportedCount : reportedCount
+      return { used: total - remaining, remaining, total }
+    }
+
+    function windowStats(options) {
+      const boostFactor = options.boost > 0 ? options.boost / 1000 : 1
+      const stats = {
+        unlimited: false,
+        exhausted: false,
+        percent: null,
+        remaining: null,
+        used: null,
+        total: null,
+      }
+      if (options.status === 3) {
+        stats.unlimited = true
+        return stats
+      }
+      if (options.status === 2) {
+        stats.exhausted = true
+        stats.percent = 0
+        return stats
+      }
+      const counts = resolveQuotaCounts(options.count, options.total, options.percent)
+      if (counts) {
+        stats.remaining = counts.remaining
+        stats.used = counts.used
+        stats.total = counts.total
+      }
+      if (options.percent !== null && options.percent !== undefined && Number.isFinite(options.percent)) {
+        stats.percent = clampPct(options.percent * boostFactor)
+      } else if (counts) {
+        stats.percent = clampPct((counts.remaining / counts.total) * 100 * boostFactor)
+      }
+      return stats
+    }
+
+    function isUnavailablePlan(row) {
+      return row.current_interval_total_count === 0
+        && row.current_weekly_total_count === 0
+        && row.current_interval_status === 3
+        && row.current_weekly_status === 3
+    }
+
+    function buildSnapshot(payload) {
+      const rows = Array.isArray(payload && payload.model_remains) ? payload.model_remains : []
+      const models = rows.filter((row) => !isUnavailablePlan(row)).map((row) => {
+        const intervalSpan = row.end_time > row.start_time ? row.end_time - row.start_time : null
+        const weeklySpan = row.weekly_end_time > row.weekly_start_time ? row.weekly_end_time - row.weekly_start_time : null
+        return {
+          name: row.model_name || 'model',
+          interval: windowStats({
+            total: numberOrNull(row.current_interval_total_count) ?? 0,
+            count: numberOrNull(row.current_interval_usage_count) ?? 0,
+            percent: numberOrNull(row.current_interval_remaining_percent),
+            status: row.current_interval_status,
+            boost: 0,
+          }),
+          weekly: windowStats({
+            total: numberOrNull(row.current_weekly_total_count) ?? 0,
+            count: numberOrNull(row.current_weekly_usage_count) ?? 0,
+            percent: numberOrNull(row.current_weekly_remaining_percent),
+            status: row.current_weekly_status,
+            boost: numberOrNull(row.weekly_boost_permille) ?? 0,
+          }),
+          intervalSpan,
+          weeklySpan,
+          intervalResetAt: numberOrNull(row.remains_time),
+          weeklyResetAt: numberOrNull(row.weekly_remains_time),
+        }
+      })
+      return { models, fetchedAt: Date.now() }
+    }
+
+    /**
+     * The model the session actually burns: the MiniMax text plans expose a
+     * five-hour window, while image/video rows expose their own (daily) quota.
+     * The primary model is the lowest five-hour consumer of that group; its
+     * weekly row is the shared weekly quota of the same plan.
+     */
+    function primaryEntry(snapshot) {
+      const models = snapshot && Array.isArray(snapshot.models) ? snapshot.models : []
+      if (!models.length) return null
+      const fiveHourModels = models.filter((model) => model.intervalSpan === null
+        || (model.intervalSpan >= FIVE_HOURS_MIN_MS && model.intervalSpan <= FIVE_HOURS_MAX_MS))
+      const pool = fiveHourModels.length ? fiveHourModels : models
+      return pickLowest(pool.map((model) => ({ model, window: 'interval', stats: model.interval })))
+    }
+
+    /**
+     * Picks the entry the configured metric points at.
+     * Returns `{ model, window, stats }` or null when the plan reports nothing.
+     */
+    function pickMetric(snapshot, metric) {
+      const models = snapshot && Array.isArray(snapshot.models) ? snapshot.models : []
+      if (!models.length) return null
+
+      const primary = primaryEntry(snapshot)
+      if (metric === 'weekly') {
+        return primary ? { model: primary.model, window: 'weekly', stats: primary.model.weekly } : null
+      }
+      if (metric === 'lowestPercent') {
+        const entries = []
+        models.forEach((model) => {
+          entries.push({ model, window: 'interval', stats: model.interval })
+          entries.push({ model, window: 'weekly', stats: model.weekly })
+        })
+        return pickLowest(entries)
+      }
+      if (metric === 'lowestAbsolute') {
+        const entries = []
+        models.forEach((model) => {
+          if (model.interval.remaining !== null) entries.push({ model, window: 'interval', stats: model.interval })
+          if (model.weekly.remaining !== null) entries.push({ model, window: 'weekly', stats: model.weekly })
+        })
+        if (!entries.length) return null
+        return entries.reduce((best, entry) => (entry.stats.remaining < best.stats.remaining ? entry : best), entries[0])
+      }
+      return primary
+    }
+
+    function pickLowest(entries) {
+      if (!entries.length) return null
+      const scored = entries.filter((entry) => !entry.stats.unlimited && entry.stats.percent !== null)
+      if (scored.length) {
+        return scored.reduce((best, entry) => (entry.stats.percent < best.stats.percent ? entry : best), scored[0])
+      }
+      const unlimited = entries.find((entry) => entry.stats.unlimited)
+      return unlimited || entries[0]
+    }
+
+    /** Percent rendered for an entry, including the "∞" case. */
+    function percentText(stats) {
+      if (!stats) return '—'
+      if (stats.unlimited) return '∞'
+      if (stats.percent === null) return '—'
+      return `${stats.percent}%`
+    }
+
+    /* ------------------------------------------------------------------ *
+     * Store
+     * ------------------------------------------------------------------ */
+
+    const store = (() => {
+      let state = {
+        status: 'idle',
+        error: null,
+        snapshot: null,
+        metric: DEFAULT_PREFS.metric,
+        region: DEFAULT_PREFS.region,
+        refreshMinutes: DEFAULT_PREFS.refreshMinutes,
+        hasKey: false,
+        updatedAt: null,
+      }
+      const listeners = new Set()
+      let loadPromise = null
+      let preferredBase = null
+      let inflight = null
+
+      function set(patch) {
+        state = Object.assign({}, state, patch)
+        listeners.forEach((listener) => {
+          try {
+            listener()
+          } catch (error) {
+            console.error('minimax token plan subscriber crashed:', error)
+          }
+        })
+      }
+
+      function subscribe(listener) {
+        listeners.add(listener)
+        return () => {
+          listeners.delete(listener)
+        }
+      }
+
+      function getState() {
+        return state
+      }
+
+      async function load() {
+        if (!loadPromise) {
+          loadPromise = (async () => {
+            try {
+              const prefs = await readPrefs()
+              if (prefs && typeof prefs === 'object') {
+                set({
+                  metric: METRIC_IDS.indexOf(prefs.metric) >= 0 ? prefs.metric : DEFAULT_PREFS.metric,
+                  region: prefs.region === 'cn' || prefs.region === 'global' ? prefs.region : DEFAULT_PREFS.region,
+                  refreshMinutes: Number.isFinite(prefs.refreshMinutes) && prefs.refreshMinutes >= 1
+                    ? Math.min(60, Math.round(prefs.refreshMinutes))
+                    : DEFAULT_PREFS.refreshMinutes,
+                })
+              }
+              const blob = await openDatabase().then(async (database) => {
+                try {
+                  return await databaseGet(database, DB_KEY_SECRET)
+                } finally {
+                  database.close()
+                }
+              })
+              set({ hasKey: !!blob })
+            } catch (error) {
+              set({ error: messageOf(error) })
+            }
+          })()
+        }
+        return loadPromise
+      }
+
+      async function fetchQuota(apiKey, region) {
+        const bases = []
+        const push = (base) => {
+          if (base && bases.indexOf(base) < 0) bases.push(base)
+        }
+        if (region === 'cn' || region === 'global') {
+          push(REGION_BASE[region])
+        } else {
+          push(preferredBase)
+          push(REGION_BASE.global)
+          push(REGION_BASE.cn)
+        }
+        let failure = ''
+        for (const base of bases) {
+          try {
+            const response = await fetch(base + QUOTA_PATH, {
+              method: 'GET',
+              headers: { Authorization: `Bearer ${apiKey}` },
+            })
+            let payload = null
+            try {
+              payload = await response.json()
+            } catch (error) {
+              payload = null
+            }
+            const baseResp = payload && payload.base_resp
+            if (baseResp && baseResp.status_code === 0 && Array.isArray(payload.model_remains)) {
+              preferredBase = base
+              return payload
+            }
+            failure = (baseResp && baseResp.status_msg) || `HTTP ${response.status}`
+          } catch (error) {
+            failure = messageOf(error)
+          }
+        }
+        throw new Error(failure || 'REQUEST_FAILED')
+      }
+
+      async function refresh(force) {
+        await load()
+        if (!state.hasKey) {
+          set({ status: 'unconfigured', snapshot: null, error: null })
+          return
+        }
+        if (!force && state.status === 'loading') return
+        if (inflight) return inflight
+        set({ status: 'loading' })
+        inflight = (async () => {
+          try {
+            const apiKey = await decryptSecret()
+            if (!apiKey) {
+              set({ status: 'unconfigured', hasKey: false, snapshot: null })
+              return
+            }
+            const payload = await fetchQuota(apiKey, state.region)
+            const snapshot = buildSnapshot(payload)
+            set({
+              status: 'ready',
+              error: null,
+              snapshot,
+              updatedAt: Date.now(),
+              hasKey: true,
+            })
+          } catch (error) {
+            set({ status: 'error', error: messageOf(error) })
+          } finally {
+            inflight = null
+          }
+        })()
+        return inflight
+      }
+
+      async function saveSecret(value) {
+        await encryptSecret(value)
+        set({ hasKey: true, error: null })
+        await refresh(true)
+      }
+
+      async function removeSecret() {
+        await clearSecret()
+        set({ hasKey: false, status: 'unconfigured', snapshot: null, error: null })
+      }
+
+      async function setPrefs(patch) {
+        const next = {
+          metric: patch.metric !== undefined ? patch.metric : state.metric,
+          region: patch.region !== undefined ? patch.region : state.region,
+          refreshMinutes: patch.refreshMinutes !== undefined ? patch.refreshMinutes : state.refreshMinutes,
+        }
+        set(next)
+        try {
+          await writePrefs(next)
+        } catch (error) {
+          console.error('minimax token plan could not persist preferences:', error)
+        }
+      }
+
+      /** Called by the interval: refetch only when the data went stale. */
+      function tick() {
+        const intervalMs = Math.max(1, state.refreshMinutes) * 60000
+        const age = state.updatedAt ? Date.now() - state.updatedAt : Infinity
+        if (state.status === 'idle') {
+          refresh(false)
+          return
+        }
+        if (state.status === 'error' && age > intervalMs) {
+          refresh(false)
+          return
+        }
+        if (age >= intervalMs) refresh(false)
+      }
+
+      return { subscribe, getState, load, refresh, saveSecret, removeSecret, setPrefs, tick }
+    })()
+
+    /* ------------------------------------------------------------------ *
+     * Styles
+     * ------------------------------------------------------------------ */
+
+    const STYLE = `
+.mm-root{display:inline-flex;min-width:0}
+.mm-anchor{display:inline-flex;min-width:0;font-size:calc(var(--dsh-content-font-size-secondary,13px) - 1px);line-height:calc(20px + var(--dsh-content-font-delta-secondary,0px))}
+.mm-pill{display:inline-flex;align-items:center;gap:6px;box-sizing:border-box;max-width:100%;padding:1px 8px;border:none;border-radius:var(--dsw-radius-sm);background:transparent;color:var(--dsw-alias-label-tertiary);font:inherit;font-variant-numeric:tabular-nums;line-height:inherit;white-space:nowrap}
+.mm-pill svg{width:14px;height:14px;flex:none}
+button.mm-pill{cursor:pointer}
+button.mm-pill[aria-expanded='true']{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary)}
+@media (hover:hover){button.mm-pill:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary)}}
+.mm-label{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.mm-busy{color:var(--dsw-alias-label-quaternary)}
+.mm-error{color:var(--dsw-alias-state-error-primary)}
+.mm-warn{color:var(--dsw-alias-state-warn-primary)}
+.mm-good{color:var(--dsw-alias-state-success-primary)}
+.mm-tip{position:relative;display:inline-flex;min-width:0}
+.mm-tip::after{content:attr(data-tip);position:absolute;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%);z-index:1100;max-width:280px;padding:4px 8px;border-radius:var(--dsw-radius-sm);background:var(--dsw-alias-tooltip-bg);color:var(--dsw-alias-tooltip-label);font-size:11px;line-height:16px;white-space:nowrap;opacity:0;pointer-events:none;transition:opacity .12s ease}
+.mm-tip:hover::after,.mm-tip:focus-within::after{opacity:1}
+.mm-panel{position:fixed;z-index:1100;box-sizing:border-box;width:max-content;min-width:min(320px,calc(100vw - 24px));max-width:min(460px,calc(100vw - 24px));padding:16px;border:0;border-radius:var(--dsw-radius-lg);background:var(--dsw-specific-menu);backdrop-filter:var(--dsw-menu-backdrop-filter);--dsw-elevation-stroke-color:var(--dsw-alias-border-l1);box-shadow:var(--dsw-elevation-prominent);font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary);cursor:default;max-height:calc(100dvh - 12px - max(12px,var(--dsh-frame-overlay-top,12px)));overflow-x:hidden;overflow-y:auto;--dsh-scrollbar-thumb:var(--dsw-alias-scrollbar-bg-l2);--dsh-scrollbar-thumb-hover:var(--dsw-alias-scrollbar-hover-l2);position-area:none;top:max(12px,var(--dsh-frame-overlay-top,12px));bottom:max(12px,calc(anchor(top) + 8px));left:max(12px,anchor(left));right:12px;position-try-fallbacks:--dsh-stat-window,--dsh-stat-opposite,--dsh-stat-wide-opposite,--dsh-stat-tall,--dsh-stat-viewport;align-self:end;justify-self:start;height:fit-content;min-height:0;margin:0}
+.mm-title{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:8px;color:var(--dsw-alias-label-primary);font-weight:500}
+.mm-title-label{display:inline-flex;align-items:center;gap:6px;min-width:0}
+.mm-title-label svg{width:14px;height:14px;flex:none}
+.mm-title-value{font-variant-numeric:tabular-nums}
+.mm-rule{margin:10px 0;border-top:.5px solid var(--dsw-alias-border-l2)}
+.mm-details{display:grid;grid-template-columns:minmax(76px,auto) minmax(0,1fr);gap:6px 16px;margin:0;color:var(--dsw-alias-label-tertiary)}
+.mm-details dt,.mm-details dd{min-width:0;margin:0}
+.mm-details dd{color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums;text-align:right}
+.mm-section{margin:0 0 6px;color:var(--dsw-alias-label-primary);font-weight:500}
+.mm-table{display:grid;grid-template-columns:minmax(0,1fr) minmax(64px,auto) minmax(64px,auto);gap:4px 12px;margin:0;color:var(--dsw-alias-label-tertiary)}
+.mm-table span:nth-child(3n+2),.mm-table span:nth-child(3n+3){text-align:right;font-variant-numeric:tabular-nums}
+.mm-table .mm-head{color:var(--dsw-alias-label-quaternary)}
+.mm-table .mm-name{color:var(--dsw-alias-label-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mm-field{display:grid;grid-template-columns:minmax(0,1fr);gap:4px;margin:0 0 10px}
+.mm-field-label{color:var(--dsw-alias-label-primary)}
+.mm-field-hint{color:var(--dsw-alias-label-quaternary)}
+.mm-input,.mm-select{box-sizing:border-box;width:100%;padding:4px 8px;border:1px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-sm);background:var(--dsw-specific-input-major);color:var(--dsw-alias-label-primary);font:inherit;font-variant-numeric:tabular-nums}
+.mm-input:focus,.mm-select:focus{outline:none;border-color:var(--dsw-alias-border-selected)}
+.mm-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.mm-button{padding:3px 10px;border:1px solid transparent;border-radius:var(--dsw-radius-sm);background:var(--dsw-alias-button-primary-fill);color:var(--dsw-alias-label-on-color);font:inherit;cursor:pointer}
+.mm-button:hover{background:var(--dsw-alias-button-primary-hover)}
+.mm-button[disabled]{opacity:.6;cursor:default}
+.mm-button.mm-ghost{background:transparent;border-color:var(--dsw-alias-border-l2);color:var(--dsw-alias-label-secondary)}
+.mm-button.mm-ghost:hover{background:var(--dsw-alias-interactive-bg-hover)}
+.mm-note{margin:0;color:var(--dsw-alias-label-quaternary)}
+.mm-status{margin:0;color:var(--dsw-alias-label-tertiary)}
+.mm-inline{display:inline-flex;align-items:center;gap:6px}
+`
+
+    /* ------------------------------------------------------------------ *
+     * Icons
+     * ------------------------------------------------------------------ */
+
+    function GaugeIcon() {
+      return h('svg', {
+        viewBox: '0 0 24 24',
+        fill: 'none',
+        stroke: 'currentColor',
+        strokeWidth: 1.6,
+        strokeLinecap: 'round',
+        strokeLinejoin: 'round',
+        'aria-hidden': 'true',
+      }, h('path', { d: 'M12 3a9 9 0 1 0 9 9' }), h('path', { d: 'M12 12l4.5-3.6' }), h('circle', { cx: 12, cy: 12, r: 1.3, fill: 'currentColor', stroke: 'none' }))
+    }
+
+    /* ------------------------------------------------------------------ *
+     * Components
+     * ------------------------------------------------------------------ */
+
+    function useTranslate(props) {
+      const injected = props && props.t
+      return useMemo(() => {
+        if (typeof injected === 'function') return injected
+        return (key, params) => {
+          let text = EN[key] || key
+          if (params) {
+            text = text.replace(/\{(\w+)\}/g, (match, name) => (name in params ? String(params[name]) : match))
+          }
+          return text
+        }
+      }, [injected])
+    }
+
+    function usePanelDismiss(open, setOpen, rootRef, panelRef) {
+      useEffect(() => {
+        if (!open) return undefined
+        function onKeyDown(event) {
+          if (event.key === 'Escape') setOpen(false)
+        }
+        function onPointerDown(event) {
+          const root = rootRef.current
+          const panel = panelRef.current
+          if (!root || !panel) return
+          if (root.contains(event.target) || panel.contains(event.target)) return
+          setOpen(false)
+        }
+        document.addEventListener('keydown', onKeyDown, true)
+        document.addEventListener('pointerdown', onPointerDown, true)
+        return () => {
+          document.removeEventListener('keydown', onKeyDown, true)
+          document.removeEventListener('pointerdown', onPointerDown, true)
+        }
+      }, [open, rootRef, panelRef, setOpen])
+    }
+
+    function QuotaPanel(props) {
+      const t = useTranslate(props)
+      const state = useSyncExternalStore(store.subscribe, store.getState, store.getState)
+      const [settingsOpen, setSettingsOpen] = useState(false)
+      const [keyDraft, setKeyDraft] = useState('')
+      const [busy, setBusy] = useState(false)
+      const [notice, setNotice] = useState('')
+      const [, forceTick] = useState(0)
+
+      const snapshot = state.snapshot
+      const entry = pickMetric(snapshot, state.metric)
+      const metricLabel = t(`metric.${state.metric}`)
+
+      useEffect(() => {
+        const timer = setInterval(() => forceTick((value) => value + 1), 1000)
+        return () => clearInterval(timer)
+      }, [])
+
+      function intervalEntry() {
+        const primary = primaryEntry(snapshot)
+        return primary ? { model: primary.model, window: 'interval', stats: primary.model.interval } : null
+      }
+
+      function weeklyEntry() {
+        const primary = primaryEntry(snapshot)
+        return primary ? { model: primary.model, window: 'weekly', stats: primary.model.weekly } : null
+      }
+
+      const five = intervalEntry()
+      const week = weeklyEntry()
+
+      function windowRow(label, picked) {
+        if (!picked) {
+          return [h('dt', { key: `${label}-label` }, label), h('dd', { key: `${label}-value` }, t('panel.noData'))]
+        }
+        const stats = picked.stats
+        const parts = [percentText(stats)]
+        if (stats.remaining !== null) {
+          parts.push(`${formatCount(stats.remaining)}`)
+        }
+        const resetIn = picked.window === 'interval'
+          ? picked.model.intervalResetAt
+          : picked.model.weeklyResetAt
+        const rows = [
+          h('dt', { key: `${label}-label` }, label),
+          h('dd', { key: `${label}-value` }, parts.join(' · ')),
+        ]
+        if (resetIn) {
+          const remaining = Math.max(0, resetIn)
+          rows.push(h('dt', { key: `${label}-reset-label` }, t('panel.resetIn', { time: formatDuration(remaining) })))
+          rows.push(h('dd', { key: `${label}-reset-value` }, formatClock(Date.now() + remaining)))
+        }
+        return rows
+      }
+
+      async function onSave(event) {
+        event.preventDefault()
+        const value = keyDraft.trim()
+        if (!value) {
+          setNotice(t('settings.error.empty'))
+          return
+        }
+        setBusy(true)
+        setNotice('')
+        try {
+          await store.saveSecret(value)
+          setKeyDraft('')
+          setNotice(t('settings.saved'))
+        } catch (error) {
+          setNotice(messageOf(error) === 'WEB_CRYPTO_UNAVAILABLE'
+            ? t('settings.error.crypto')
+            : t('settings.error.failed', { message: messageOf(error) }))
+        } finally {
+          setBusy(false)
+        }
+      }
+
+      async function onClear() {
+        setBusy(true)
+        try {
+          await store.removeSecret()
+          setKeyDraft('')
+          setNotice(t('settings.cleared'))
+        } finally {
+          setBusy(false)
+        }
+      }
+
+      const children = []
+
+      children.push(h('div', { className: 'mm-title', key: 'title' },
+        h('span', { className: 'mm-title-label' }, h(GaugeIcon, null), h('span', null, t('panel.title'))),
+        h('span', { className: 'mm-title-value' }, entry ? percentText(entry.stats) : t('pill.idle'))))
+
+      children.push(h('div', { className: 'mm-rule', key: 'rule-1' }))
+
+      const details = []
+      details.push(h('dt', { key: 'displayed-label' }, t('panel.displayed')))
+      details.push(h('dd', { key: 'displayed-value' }, metricLabel))
+      details.push(...windowRow(t('panel.interval'), five))
+      details.push(...windowRow(t('panel.weekly'), week))
+      details.push(h('dt', { key: 'updated-label' }, t('panel.updatedAt', { time: formatClock(state.updatedAt) })))
+      details.push(h('dd', { key: 'updated-value' }, entry ? (entry.model ? entry.model.name : '') : ''))
+      children.push(h('dl', { className: 'mm-details', key: 'details' }, details))
+
+      if (state.status === 'error') {
+        children.push(h('p', { className: 'mm-status mm-error', key: 'error' }, state.error || t('pill.error')))
+      }
+
+      if (snapshot && snapshot.models.length) {
+        children.push(h('div', { className: 'mm-rule', key: 'rule-2' }))
+        children.push(h('p', { className: 'mm-section', key: 'models-title' }, t('panel.models')))
+        const cells = []
+        cells.push(h('span', { className: 'mm-head', key: 'h1' }, t('panel.model')))
+        cells.push(h('span', { className: 'mm-head', key: 'h2' }, t('panel.interval')))
+        cells.push(h('span', { className: 'mm-head', key: 'h3' }, t('panel.weekly')))
+        snapshot.models.forEach((model, index) => {
+          cells.push(h('span', { className: 'mm-name', key: `n${index}` }, model.name))
+          cells.push(h('span', { key: `i${index}` }, percentText(model.interval)))
+          cells.push(h('span', { key: `w${index}` }, percentText(model.weekly)))
+        })
+        children.push(h('div', { className: 'mm-table', key: 'models' }, cells))
+        const hasAbsolute = snapshot.models.some((model) => model.interval.remaining !== null || model.weekly.remaining !== null)
+        if (!hasAbsolute) {
+          children.push(h('p', { className: 'mm-note', key: 'no-absolute' }, t('panel.noAbsolute')))
+        }
+      }
+
+      children.push(h('div', { className: 'mm-rule', key: 'rule-3' }))
+
+      children.push(h('div', { className: 'mm-row', key: 'actions' },
+        h('button', {
+          type: 'button',
+          className: 'mm-button mm-ghost',
+          onClick: () => store.refresh(true),
+        }, t('panel.refresh')),
+        h('button', {
+          type: 'button',
+          className: 'mm-button mm-ghost',
+          'aria-expanded': settingsOpen,
+          onClick: () => setSettingsOpen((value) => !value),
+        }, t('panel.settings'))))
+
+      if (settingsOpen) {
+        children.push(h('div', { className: 'mm-rule', key: 'rule-4' }))
+        children.push(h('form', { className: 'mm-field', key: 'key-form', onSubmit: onSave },
+          h('label', { className: 'mm-field-label', htmlFor: 'mm-api-key' }, t('settings.apiKey')),
+          h('input', {
+            id: 'mm-api-key',
+            className: 'mm-input',
+            type: 'password',
+            autoComplete: 'off',
+            spellCheck: false,
+            placeholder: t('settings.apiKeyPlaceholder'),
+            value: keyDraft,
+            onChange: (event) => setKeyDraft(event.target.value),
+          }),
+          h('p', { className: 'mm-field-hint' }, t('settings.apiKeyHint')),
+          h('div', { className: 'mm-row' },
+            h('button', { type: 'submit', className: 'mm-button', disabled: busy }, busy ? t('settings.saving') : t('settings.save')),
+            h('button', { type: 'button', className: 'mm-button mm-ghost', disabled: busy, onClick: onClear }, t('settings.clear')),
+            h('span', { className: 'mm-field-hint' }, state.hasKey ? t('settings.keyPresent') : t('settings.keyMissing')))))
+
+        children.push(h('div', { className: 'mm-field', key: 'metric-field' },
+          h('label', { className: 'mm-field-label', htmlFor: 'mm-metric' }, t('settings.metric')),
+          h('select', {
+            id: 'mm-metric',
+            className: 'mm-select',
+            value: state.metric,
+            onChange: (event) => store.setPrefs({ metric: event.target.value }),
+          }, METRIC_IDS.map((id) => h('option', { key: id, value: id }, t(`metric.${id}`))))))
+
+        children.push(h('div', { className: 'mm-field', key: 'region-field' },
+          h('label', { className: 'mm-field-label', htmlFor: 'mm-region' }, t('settings.region')),
+          h('select', {
+            id: 'mm-region',
+            className: 'mm-select',
+            value: state.region,
+            onChange: (event) => store.setPrefs({ region: event.target.value }),
+          },
+          h('option', { key: 'auto', value: 'auto' }, t('settings.region.auto')),
+          h('option', { key: 'global', value: 'global' }, t('settings.region.global')),
+          h('option', { key: 'cn', value: 'cn' }, t('settings.region.cn')))))
+
+        children.push(h('div', { className: 'mm-field', key: 'interval-field' },
+          h('label', { className: 'mm-field-label', htmlFor: 'mm-interval' }, t('settings.refreshMinutes')),
+          h('input', {
+            id: 'mm-interval',
+            className: 'mm-input',
+            type: 'number',
+            min: 1,
+            max: 60,
+            step: 1,
+            value: String(state.refreshMinutes),
+            onChange: (event) => {
+              const value = Number.parseInt(event.target.value, 10)
+              if (Number.isFinite(value) && value >= 1 && value <= 60) store.setPrefs({ refreshMinutes: value })
+            },
+          })))
+
+        children.push(h('p', { className: 'mm-note', key: 'security' }, t('settings.security')))
+      }
+
+      if (notice) {
+        children.push(h('p', { className: 'mm-status', key: 'notice' }, notice))
+      }
+
+      return h('div', { ref: props.panelRef, className: 'mm-panel', role: 'dialog', 'aria-label': t('panel.title') }, children)
+    }
+
+    function MiniMaxTokenPlanPill(props) {
+      const t = useTranslate(props)
+      const state = useSyncExternalStore(store.subscribe, store.getState, store.getState)
+      const [open, setOpen] = useState(false)
+      const rootRef = useRef(null)
+      const panelRef = useRef(null)
+      const anchorId = useRef(null)
+      if (anchorId.current === null) {
+        anchorId.current = `mm${Math.random().toString(36).slice(2, 9)}`
+      }
+      const anchorName = `--dsh-mm-${anchorId.current}`
+
+      usePanelDismiss(open, setOpen, rootRef, panelRef)
+
+      useEffect(() => {
+        store.refresh(false)
+      }, [])
+
+      const entry = pickMetric(state.snapshot, state.metric)
+      const metricLabel = t(`metric.${state.metric}`)
+
+      let label = t('pill.idle')
+      let tip = t('pill.tip.none')
+      let tone = ''
+      if (state.status === 'idle' || (state.status === 'loading' && !entry)) {
+        label = t('pill.loading')
+        tip = t('pill.tip.loading')
+        tone = 'mm-busy'
+      } else if (state.status === 'unconfigured' || (!state.hasKey && state.status !== 'error')) {
+        label = t('pill.unconfigured')
+        tip = t('pill.tip.unconfigured')
+      } else if (state.status === 'error') {
+        label = t('pill.error')
+        tip = t('pill.tip.error', { message: state.error || '' })
+        tone = 'mm-error'
+      } else if (entry) {
+        label = percentText(entry.stats)
+        tip = t('pill.tip.ready', { metric: metricLabel, value: label })
+        if (entry.stats.exhausted || (entry.stats.percent !== null && entry.stats.percent <= 20)) tone = 'mm-warn'
+        else if (entry.stats.percent !== null && entry.stats.percent >= 50) tone = 'mm-good'
+      }
+
+      return h('span', { className: 'mm-root', key: 'root' },
+        h('style', { key: 'style', dangerouslySetInnerHTML: { __html: STYLE } }),
+        h('span', { ref: rootRef, style: { anchorName }, className: 'mm-anchor', 'data-composer-stat': SLOT_ID, key: 'anchor' },
+          h('span', { className: 'mm-tip', 'data-tip': tip, key: 'tip' },
+            h('button', {
+              type: 'button',
+              className: `mm-pill ${tone}`.trim(),
+              'aria-haspopup': 'dialog',
+              'aria-expanded': open,
+              'aria-label': tip,
+              onClick: () => setOpen((value) => !value),
+            },
+            h(GaugeIcon, null),
+            h('span', { className: 'mm-label' }, label))),
+          open && createPortal(h(QuotaPanel, { panelRef, t }), document.body)))
+    }
+
+    /* ------------------------------------------------------------------ *
+     * Plugin entry
+     * ------------------------------------------------------------------ */
+
+    const plugin = {
+      inject: ['slots', 'locale'],
+      apply(ctx) {
+        ctx.effect(() => ctx.locale.register(NS, { zh: ZH, en: EN }), 'minimax token plan: dictionaries')
+
+        ctx.slots.inject('conversation.composer.dock', () => ctx.slots.register({
+          name: 'conversation.composer.dock',
+          id: SLOT_ID,
+          order: 2,
+          locale: NS,
+        }, MiniMaxTokenPlanPill))
+
+        ctx.effect(() => {
+          const timer = setInterval(() => store.tick(), TICK_MS)
+          return () => clearInterval(timer)
+        }, 'minimax token plan: polling')
+      },
+    }
+
+    // Test hook: only attached when the host opts in before loading the
+    // bundle, so a production bundle exposes nothing extra.
+    if (typeof globalThis !== 'undefined' && globalThis.__DSH_MINIMAX_TOKEN_PLAN_TEST__) {
+      plugin.__internals = {
+        resolveQuotaCounts,
+        windowStats,
+        buildSnapshot,
+        pickMetric,
+        primaryEntry,
+        percentText,
+      }
+    }
+    return plugin
+  },
+})

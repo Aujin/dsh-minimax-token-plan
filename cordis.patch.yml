@@ -1,0 +1,3 @@
+- insert:
+    - id: minimax-token-plan
+      name: 'dsh-minimax-token-plan'
