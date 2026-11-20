@@ -96,8 +96,12 @@ window.__ModuleLoader__.load({
       'settings.cleared': '已清除',
       'settings.error.empty': '请输入 API Key',
       'settings.error.failed': '保存失败：{message}',
+      'settings.error.clearFailed': '清除失败：{message}',
       'settings.error.crypto': '当前环境不支持 WebCrypto，无法加密保存密钥',
       'settings.error.request': '无法访问 MiniMax 套餐用量接口',
+      'settings.error.vault': '本机加密存储不可用',
+      'settings.error.interval': '刷新间隔需在 1–60 分钟之间',
+      'settings.refreshHint': '取值范围 1–60 分钟',
       'settings.region': '服务区域',
       'settings.region.auto': '自动检测',
       'settings.region.global': '国际 api.minimax.io',
@@ -152,8 +156,12 @@ window.__ModuleLoader__.load({
       'settings.cleared': 'Cleared',
       'settings.error.empty': 'Please enter an API key',
       'settings.error.failed': 'Could not save: {message}',
+      'settings.error.clearFailed': 'Could not clear the key: {message}',
       'settings.error.crypto': 'WebCrypto is unavailable here, so the key cannot be stored encrypted',
       'settings.error.request': 'Could not reach the MiniMax plan usage endpoint',
+      'settings.error.vault': 'The local encrypted store is unavailable',
+      'settings.error.interval': 'The refresh interval must be between 1 and 60 minutes',
+      'settings.refreshHint': 'Choose a value between 1 and 60 minutes',
       'settings.region': 'Service region',
       'settings.region.auto': 'Detect automatically',
       'settings.region.global': 'Global api.minimax.io',
@@ -178,10 +186,20 @@ window.__ModuleLoader__.load({
      * ------------------------------------------------------------------ */
 
     function messageOf(error, fallback) {
-      if (!error) return fallback || 'unknown error'
+      if (!error) return fallback || '—'
       if (typeof error === 'string') return error
       if (error.message) return String(error.message)
       return String(error)
+    }
+
+    /**
+     * A stable code for local-storage failures. The message is kept for the
+     * console, the user only ever sees the localized text.
+     */
+    function vaultError(detail) {
+      const error = new Error('VAULT_UNAVAILABLE')
+      if (detail) error.cause = detail
+      return error
     }
 
     function clampPct(value) {
@@ -205,6 +223,9 @@ window.__ModuleLoader__.load({
       const minutes = totalMinutes % 60
       const translate = typeof t === 'function' ? t : null
       if (hours > 0) {
+        if (minutes === 0) {
+          return translate ? translate('duration.h', { h: hours }) : `${hours}h`
+        }
         return translate ? translate('duration.hm', { h: hours, m: minutes }) : `${hours}h ${minutes}m`
       }
       if (minutes > 0) {
@@ -248,7 +269,7 @@ window.__ModuleLoader__.load({
     function openDatabase() {
       return new Promise((resolve, reject) => {
         if (typeof indexedDB === 'undefined') {
-          reject(new Error('IndexedDB is unavailable'))
+          reject(vaultError('indexedDB missing'))
           return
         }
         const request = indexedDB.open(DB_NAME, DB_VERSION)
@@ -259,7 +280,7 @@ window.__ModuleLoader__.load({
           }
         }
         request.onsuccess = () => resolve(request.result)
-        request.onerror = () => reject(request.error || new Error('IndexedDB open failed'))
+        request.onerror = () => reject(vaultError(request.error || 'open failed'))
       })
     }
 
@@ -267,7 +288,7 @@ window.__ModuleLoader__.load({
       return new Promise((resolve, reject) => {
         const request = database.transaction(DB_STORE, 'readonly').objectStore(DB_STORE).get(key)
         request.onsuccess = () => resolve(request.result)
-        request.onerror = () => reject(request.error || new Error('IndexedDB read failed'))
+        request.onerror = () => reject(vaultError(request.error || 'read failed'))
       })
     }
 
@@ -276,7 +297,7 @@ window.__ModuleLoader__.load({
         const transaction = database.transaction(DB_STORE, 'readwrite')
         transaction.objectStore(DB_STORE).put(value, key)
         transaction.oncomplete = () => resolve(undefined)
-        transaction.onerror = () => reject(transaction.error || new Error('IndexedDB write failed'))
+        transaction.onerror = () => reject(vaultError(transaction.error || 'write failed'))
       })
     }
 
@@ -285,7 +306,7 @@ window.__ModuleLoader__.load({
         const transaction = database.transaction(DB_STORE, 'readwrite')
         transaction.objectStore(DB_STORE).delete(key)
         transaction.oncomplete = () => resolve(undefined)
-        transaction.onerror = () => reject(transaction.error || new Error('IndexedDB delete failed'))
+        transaction.onerror = () => reject(vaultError(transaction.error || 'delete failed'))
       })
     }
 
@@ -436,7 +457,7 @@ window.__ModuleLoader__.load({
         const intervalSpan = row.end_time > row.start_time ? row.end_time - row.start_time : null
         const weeklySpan = row.weekly_end_time > row.weekly_start_time ? row.weekly_end_time - row.weekly_start_time : null
         return {
-          name: row.model_name || 'model',
+          name: row.model_name || '—',
           interval: windowStats({
             total: numberOrNull(row.current_interval_total_count) ?? 0,
             count: numberOrNull(row.current_interval_usage_count) ?? 0,
@@ -522,7 +543,9 @@ window.__ModuleLoader__.load({
       if (!stats) return '—'
       if (stats.unlimited) return '∞'
       if (stats.percent === null) return '—'
-      return `${stats.percent}%`
+      // A boosted plan can report more than the display cap; mark it as a
+      // lower bound instead of showing a false exact number.
+      return stats.percent >= MAX_DISPLAY_PCT ? `${MAX_DISPLAY_PCT}%+` : `${stats.percent}%`
     }
 
     /**
@@ -544,6 +567,7 @@ window.__ModuleLoader__.load({
       if (!message) return t('pill.error')
       if (message === 'REQUEST_FAILED') return t('settings.error.request')
       if (message === 'WEB_CRYPTO_UNAVAILABLE') return t('settings.error.crypto')
+      if (message === 'VAULT_UNAVAILABLE') return t('settings.error.vault')
       return message
     }
 
@@ -764,7 +788,6 @@ button.mm-pill[aria-expanded='true']{background:var(--dsw-alias-interactive-bg-h
 .mm-busy{color:var(--dsw-alias-label-caption)}
 .mm-error{color:var(--dsw-alias-state-error-primary)}
 .mm-warn{color:var(--dsw-alias-state-warn-primary)}
-.mm-good{color:var(--dsw-alias-state-success-primary)}
 .mm-tip{position:relative;display:inline-flex;min-width:0}
 .mm-tip::after{content:attr(data-tip);position:absolute;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%);z-index:1100;max-width:280px;padding:4px 8px;border-radius:var(--dsw-radius-sm);background:var(--dsw-alias-tooltip-bg);color:var(--dsw-alias-tooltip-label);font-size:11px;line-height:16px;text-align:left;white-space:normal;overflow-wrap:anywhere;opacity:0;pointer-events:none;transition:opacity .12s ease}
 .mm-tip:hover::after,.mm-tip:focus-within::after{opacity:1}
@@ -789,7 +812,7 @@ button.mm-pill[aria-expanded='true']{background:var(--dsw-alias-interactive-bg-h
 .mm-field-hint{color:var(--dsw-alias-label-caption)}
 .mm-input,.mm-select{box-sizing:border-box;width:100%;padding:4px 8px;border:1px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-sm);background:var(--dsw-specific-input-major);color:var(--dsw-alias-label-primary);font:inherit;font-variant-numeric:tabular-nums}
 .mm-input:focus,.mm-select:focus{border-color:var(--dsw-alias-border-selected)}
-.mm-input:focus-visible,.mm-select:focus-visible,.mm-button:focus-visible{outline-style:solid;outline-offset:-2px}
+.mm-input:focus-visible,.mm-select:focus-visible,.mm-button:focus-visible{outline:var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:-2px}
 .mm-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .mm-button{padding:3px 10px;border:1px solid transparent;border-radius:var(--dsw-radius-sm);background:var(--dsw-alias-button-primary-fill);color:var(--dsw-alias-label-on-color);font:inherit;cursor:pointer}
 .mm-button:hover{background:var(--dsw-alias-button-primary-hover)}
@@ -861,6 +884,16 @@ button.mm-pill[aria-expanded='true']{background:var(--dsw-alias-interactive-bg-h
       const first = items[0]
       const last = items[items.length - 1]
       const active = document.activeElement
+      // The panel root itself is focusable (tabIndex -1) so it can receive
+      // focus on open; from there Tab has to move to the first control and
+      // Shift+Tab to the last one, otherwise the focus escapes the dialog.
+      if (active === panel) {
+        event.preventDefault()
+        if (typeof (event.shiftKey ? last : first).focus === 'function') {
+          (event.shiftKey ? last : first).focus()
+        }
+        return
+      }
       const outside = !active || !panel.contains(active)
       if (event.shiftKey && (active === first || outside)) {
         event.preventDefault()
@@ -878,6 +911,9 @@ button.mm-pill[aria-expanded='true']{background:var(--dsw-alias-interactive-bg-h
         if (!open) return undefined
         function onKeyDown(event) {
           if (event.key === 'Escape') {
+            // Keep the host composer from reacting to the same Escape.
+            event.stopPropagation()
+            event.preventDefault()
             setOpen(false)
             return
           }
@@ -932,6 +968,24 @@ button.mm-pill[aria-expanded='true']{background:var(--dsw-alias-interactive-bg-h
       }, [open, panelRef, triggerRef])
     }
 
+    /**
+     * The reset countdown keeps its own timer so the rest of the panel does
+     * not re-render every second.
+     */
+    function CountdownRow(props) {
+      const t = props.t
+      const [, setTick] = useState(0)
+      useEffect(() => {
+        const timer = setInterval(() => setTick((value) => value + 1), 1000)
+        return () => clearInterval(timer)
+      }, [])
+      const left = Math.max(0, props.remaining || 0)
+      return [
+        h('dt', { key: 'reset-label' }, t('panel.resetIn', { time: formatDuration(left, t) })),
+        h('dd', { key: 'reset-value' }, formatClock(Date.now() + left)),
+      ]
+    }
+
     function QuotaPanel(props) {
       const t = useTranslate(props)
       const idPrefix = props.idPrefix || 'mm'
@@ -941,16 +995,10 @@ button.mm-pill[aria-expanded='true']{background:var(--dsw-alias-interactive-bg-h
       const [busy, setBusy] = useState(false)
       const [notice, setNotice] = useState('')
       const [intervalDraft, setIntervalDraft] = useState(null)
-      const [, forceTick] = useState(0)
 
       const snapshot = state.snapshot
       const entry = pickMetric(snapshot, state.metric)
       const metricLabel = t(`metric.${state.metric}`)
-
-      useEffect(() => {
-        const timer = setInterval(() => forceTick((value) => value + 1), 1000)
-        return () => clearInterval(timer)
-      }, [])
 
       function intervalEntry() {
         const primary = primaryEntry(snapshot)
@@ -986,9 +1034,7 @@ button.mm-pill[aria-expanded='true']{background:var(--dsw-alias-interactive-bg-h
           h('dd', { key: `${label}-value` }, readingText(stats)),
         ]
         if (resetIn) {
-          const remaining = Math.max(0, resetIn)
-          rows.push(h('dt', { key: `${label}-reset-label` }, t('panel.resetIn', { time: formatDuration(remaining, t) })))
-          rows.push(h('dd', { key: `${label}-reset-value` }, formatClock(Date.now() + remaining)))
+          rows.push(h(CountdownRow, { key: `${label}-reset`, remaining: resetIn, t }))
         }
         return rows
       }
@@ -1023,7 +1069,7 @@ button.mm-pill[aria-expanded='true']{background:var(--dsw-alias-interactive-bg-h
           setKeyDraft('')
           setNotice(t('settings.cleared'))
         } catch (error) {
-          setNotice(t('settings.error.failed', { message: messageOf(error) }))
+          setNotice(t('settings.error.clearFailed', { message: messageOf(error) }))
         } finally {
           setBusy(false)
         }
@@ -1035,6 +1081,8 @@ button.mm-pill[aria-expanded='true']{background:var(--dsw-alias-interactive-bg-h
         setIntervalDraft(null)
         if (Number.isFinite(value) && value >= 1 && value <= 60) {
           store.setPrefs({ refreshMinutes: value })
+        } else {
+          setNotice(t('settings.error.interval'))
         }
       }
 
@@ -1058,7 +1106,12 @@ button.mm-pill[aria-expanded='true']{background:var(--dsw-alias-interactive-bg-h
       children.push(h('dl', { className: 'mm-details', key: 'details' }, details))
 
       if (state.status === 'error') {
-        children.push(h('p', { className: 'mm-status mm-error', key: 'error' }, errorText(state.error, t)))
+        children.push(h('p', {
+          className: 'mm-status mm-error',
+          key: 'error',
+          role: 'status',
+          'aria-live': 'polite',
+        }, errorText(state.error, t)))
       }
 
       if (snapshot && snapshot.models.length) {
@@ -1092,12 +1145,24 @@ button.mm-pill[aria-expanded='true']{background:var(--dsw-alias-interactive-bg-h
           type: 'button',
           className: 'mm-button mm-ghost',
           'aria-expanded': settingsOpen,
+          'aria-controls': `${idPrefix}-settings`,
           onClick: () => setSettingsOpen((value) => !value),
         }, t('panel.settings'))))
 
+      // One live region that stays mounted while the panel is open: a screen
+      // reader only announces a change inside a region that already exists.
+      children.push(h('p', {
+        className: 'mm-status',
+        key: 'notice',
+        role: 'status',
+        'aria-live': 'polite',
+      }, notice))
+
       if (settingsOpen) {
         children.push(h('div', { className: 'mm-rule', key: 'rule-4' }))
-        children.push(h('form', { className: 'mm-field', key: 'key-form', onSubmit: onSave },
+        const settingsChildren = []
+
+        settingsChildren.push(h('form', { className: 'mm-field', key: 'key-form', onSubmit: onSave },
           h('label', { className: 'mm-field-label', htmlFor: `${idPrefix}-api-key` }, t('settings.apiKey')),
           h('input', {
             id: `${idPrefix}-api-key`,
@@ -1106,22 +1171,19 @@ button.mm-pill[aria-expanded='true']{background:var(--dsw-alias-interactive-bg-h
             autoComplete: 'off',
             spellCheck: false,
             placeholder: t('settings.apiKeyPlaceholder'),
+            'aria-describedby': `${idPrefix}-api-key-hint`,
             value: keyDraft,
             onChange: (event) => setKeyDraft(event.target.value),
           }),
-          h('p', { className: 'mm-field-hint' }, t('settings.apiKeyHint')),
+          h('p', { className: 'mm-field-hint', id: `${idPrefix}-api-key-hint` }, t('settings.apiKeyHint')),
           h('div', { className: 'mm-row' },
             h('button', { type: 'submit', className: 'mm-button', disabled: busy }, busy ? t('settings.saving') : t('settings.save')))))
 
-        children.push(h('div', { className: 'mm-row', key: 'key-clear-row' },
+        settingsChildren.push(h('div', { className: 'mm-row', key: 'key-clear-row' },
           h('button', { type: 'button', className: 'mm-button mm-danger', disabled: busy, onClick: onClear }, t('settings.clear')),
           h('span', { className: 'mm-field-hint' }, state.hasKey ? t('settings.keyPresent') : t('settings.keyMissing'))))
 
-        if (notice) {
-          children.push(h('p', { className: 'mm-status', key: 'notice', role: 'status', 'aria-live': 'polite' }, notice))
-        }
-
-        children.push(h('div', { className: 'mm-field', key: 'metric-field' },
+        settingsChildren.push(h('div', { className: 'mm-field', key: 'metric-field' },
           h('label', { className: 'mm-field-label', htmlFor: `${idPrefix}-metric` }, t('settings.metric')),
           h('select', {
             id: `${idPrefix}-metric`,
@@ -1130,7 +1192,7 @@ button.mm-pill[aria-expanded='true']{background:var(--dsw-alias-interactive-bg-h
             onChange: (event) => store.setPrefs({ metric: event.target.value }),
           }, METRIC_IDS.map((id) => h('option', { key: id, value: id }, t(`metric.${id}`))))))
 
-        children.push(h('div', { className: 'mm-field', key: 'region-field' },
+        settingsChildren.push(h('div', { className: 'mm-field', key: 'region-field' },
           h('label', { className: 'mm-field-label', htmlFor: `${idPrefix}-region` }, t('settings.region')),
           h('select', {
             id: `${idPrefix}-region`,
@@ -1142,7 +1204,7 @@ button.mm-pill[aria-expanded='true']{background:var(--dsw-alias-interactive-bg-h
           h('option', { key: 'global', value: 'global' }, t('settings.region.global')),
           h('option', { key: 'cn', value: 'cn' }, t('settings.region.cn')))))
 
-        children.push(h('div', { className: 'mm-field', key: 'interval-field' },
+        settingsChildren.push(h('div', { className: 'mm-field', key: 'interval-field' },
           h('label', { className: 'mm-field-label', htmlFor: `${idPrefix}-interval` }, t('settings.refreshMinutes')),
           h('input', {
             id: `${idPrefix}-interval`,
@@ -1151,6 +1213,7 @@ button.mm-pill[aria-expanded='true']{background:var(--dsw-alias-interactive-bg-h
             min: 1,
             max: 60,
             step: 1,
+            'aria-describedby': `${idPrefix}-interval-hint`,
             value: intervalDraft === null ? String(state.refreshMinutes) : intervalDraft,
             onChange: (event) => setIntervalDraft(event.target.value),
             onBlur: commitInterval,
@@ -1160,11 +1223,16 @@ button.mm-pill[aria-expanded='true']{background:var(--dsw-alias-interactive-bg-h
                 commitInterval()
               }
             },
-          })))
+          }),
+          h('p', { className: 'mm-field-hint', id: `${idPrefix}-interval-hint` }, t('settings.refreshHint'))))
 
-        children.push(h('p', { className: 'mm-note', key: 'security' }, t('settings.security')))
-      } else if (notice) {
-        children.push(h('p', { className: 'mm-status', key: 'notice', role: 'status', 'aria-live': 'polite' }, notice))
+        settingsChildren.push(h('p', { className: 'mm-note', key: 'security' }, t('settings.security')))
+
+        children.push(h('div', {
+          className: 'mm-settings',
+          key: 'settings',
+          id: `${idPrefix}-settings`,
+        }, settingsChildren))
       }
 
       return h('div', {
@@ -1172,6 +1240,7 @@ button.mm-pill[aria-expanded='true']{background:var(--dsw-alias-interactive-bg-h
         id: props.panelId,
         className: 'mm-panel',
         role: 'dialog',
+        'aria-modal': true,
         'aria-label': t('panel.title'),
         tabIndex: -1,
         style: { positionAnchor: props.anchorName },
@@ -1238,8 +1307,10 @@ button.mm-pill[aria-expanded='true']{background:var(--dsw-alias-interactive-bg-h
       } else if (entry) {
         label = stateText(entry.stats, t)
         tip = t('pill.tip.ready', { metric: metricLabel, value: label })
+        // The low band carries a warning glyph as well as a colour, and the
+        // healthy band keeps the resting colour, so the state is never
+        // encoded in colour alone.
         if (entry.stats.exhausted || (entry.stats.percent !== null && entry.stats.percent <= 20)) tone = 'mm-warn'
-        else if (entry.stats.percent !== null && entry.stats.percent >= 50) tone = 'mm-good'
       }
 
       return h('span', { className: 'mm-root', key: 'root' },
@@ -1251,7 +1322,7 @@ button.mm-pill[aria-expanded='true']{background:var(--dsw-alias-interactive-bg-h
               className: `mm-pill ${tone}`.trim(),
               'aria-haspopup': 'dialog',
               'aria-expanded': open,
-              'aria-controls': open ? panelId : undefined,
+              'aria-controls': panelId,
               'aria-label': `${label} · ${tip}`,
               onClick: () => setOpen((value) => !value),
             },
