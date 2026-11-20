@@ -1,6 +1,7 @@
 {
   "meta": {
     "title": "MiniMax Token Plan quota",
-    "description": "Show the remaining MiniMax Token Plan quota (5-hour and weekly windows) next to the session token usage."
+    "description": "Show the remaining MiniMax Token Plan quota (5-hour and weekly windows) next to the session token usage.",
+    "detail": "docs/DETAIL.md"
   }
 }

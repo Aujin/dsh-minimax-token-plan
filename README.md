@@ -7,6 +7,9 @@ ring.
 [中文说明](#中文说明)
 
 ![plugin badge](https://img.shields.io/badge/DeepSeek%20Harness-plugin-blue)
+[![开放插件市场](https://img.shields.io/endpoint?url=https%3A%2F%2Fdshopen.org%2Fbadge%2Fdsh-minimax-token-plan.json)](https://dshopen.org/zh/plugins/dsh-minimax-token-plan/)
+
+![preview](docs/preview.svg)
 
 ## What it does
 
@@ -93,3 +96,24 @@ Open the pill → **设置 / Settings**:
 ## License
 
 [MIT](LICENSE)
+
+## 中文说明
+
+在 DeepSeek Harness 会话底部的 `token 用量` 右侧、`上下文已用` 左侧，显示
+**MiniMax Token Plan（M Plan）** 的剩余用量。
+
+- 默认显示 **5 小时剩余**百分比；点击展开面板，可同时查看 **5 小时** 与
+  **每周**剩余、重置倒计时、分模型明细以及设置。
+- 默认显示的指标可配置：`5 小时剩余`、`周剩余`、`绝对 token 最低`、
+  `百分比最低`。
+- API Key **加密保存**：使用不可导出的 AES-256-GCM 密钥加密后存入浏览器
+  IndexedDB，不会写入 DSH 配置、profile 文件或日志。
+- 只会请求 MiniMax 官方域名（`api.minimax.io` / `api.minimax.cn`）。
+
+安装：在 *设置 → 插件 → 开放插件市场* 搜索 **MiniMax Token Plan**；或按上面的
+[GitHub 安装](#install) 方式把本仓库加入 profile。
+
+> 套餐决定能显示哪些数字：文本套餐通常只提供百分比，图像/视频套餐才提供绝对
+> 次数；当套餐不提供绝对次数时，“绝对 token 最低”显示 `—`。
+
+许可证：[MIT](LICENSE)

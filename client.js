@@ -52,7 +52,10 @@ window.__ModuleLoader__.load({
     const HOUR_MS = 3600000
     const FIVE_HOURS_MIN_MS = 4.5 * HOUR_MS
     const FIVE_HOURS_MAX_MS = 5.5 * HOUR_MS
-    const MAX_DISPLAY_PCT = 200
+    // A boosted weekly window can read far above 100 %. The clamp stays well
+    // above anything the API can report so a boosted reading is never shown as
+    // a round number it is not.
+    const MAX_DISPLAY_PCT = 1000
 
     /* ------------------------------------------------------------------ *
      * Dictionaries
@@ -63,6 +66,7 @@ window.__ModuleLoader__.load({
       'pill.loading': '查询中',
       'pill.error': '查询失败',
       'pill.idle': '—',
+      'pill.warn': '⚠',
       'pill.tip.ready': 'MiniMax {metric}：{value}',
       'pill.tip.unconfigured': '尚未配置 MiniMax API Key，点击打开设置',
       'pill.tip.loading': '正在查询 MiniMax 套餐用量…',
@@ -72,11 +76,8 @@ window.__ModuleLoader__.load({
       'panel.interval': '5 小时剩余',
       'panel.weekly': '周剩余',
       'panel.displayed': '当前显示',
-      'panel.remaining': '剩余',
-      'panel.used': '已用',
-      'panel.total': '总量',
       'panel.resetIn': '{time} 后重置',
-      'panel.updatedAt': '更新于 {time}',
+      'panel.updatedAt': '更新于',
       'panel.models': '模型明细',
       'panel.model': '模型',
       'panel.noAbsolute': '该套餐未提供绝对 token 数',
@@ -85,7 +86,6 @@ window.__ModuleLoader__.load({
       'panel.noData': '暂无数据',
       'panel.refresh': '刷新',
       'panel.settings': '设置',
-      'panel.close': '关闭',
       'settings.apiKey': 'API Key',
       'settings.apiKeyHint': 'MiniMax M Plan Key（sk-cp- 开头），仅保存在本机。',
       'settings.apiKeyPlaceholder': 'sk-cp-…',
@@ -97,19 +97,20 @@ window.__ModuleLoader__.load({
       'settings.error.empty': '请输入 API Key',
       'settings.error.failed': '保存失败：{message}',
       'settings.error.crypto': '当前环境不支持 WebCrypto，无法加密保存密钥',
+      'settings.error.request': '无法访问 MiniMax 套餐用量接口',
       'settings.region': '服务区域',
       'settings.region.auto': '自动检测',
       'settings.region.global': '国际 api.minimax.io',
       'settings.region.cn': '中国 api.minimax.cn',
       'settings.metric': '默认显示',
-      'settings.metric.interval': '5 小时剩余',
-      'settings.metric.weekly': '周剩余',
-      'settings.metric.lowestAbsolute': '绝对 token 最低',
-      'settings.metric.lowestPercent': '百分比最低',
       'settings.refreshMinutes': '刷新间隔（分钟）',
       'settings.security': 'API Key 使用 AES-256-GCM 加密后保存在本机 IndexedDB，密钥不可导出；请求只发往 MiniMax 官方域名。',
       'settings.keyPresent': '已保存 API Key（已加密）',
       'settings.keyMissing': '尚未保存 API Key',
+      'duration.hm': '{h} 小时 {m} 分',
+      'duration.h': '{h} 小时',
+      'duration.m': '{m} 分',
+      'duration.s': '{s} 秒',
       'metric.interval': '5 小时剩余',
       'metric.weekly': '周剩余',
       'metric.lowestAbsolute': '绝对 token 最低',
@@ -117,10 +118,11 @@ window.__ModuleLoader__.load({
     }
 
     const EN = {
-      'pill.unconfigured': 'Not configured',
+      'pill.unconfigured': 'Not set',
       'pill.loading': 'Loading',
       'pill.error': 'Failed',
       'pill.idle': '—',
+      'pill.warn': '⚠',
       'pill.tip.ready': 'MiniMax {metric}: {value}',
       'pill.tip.unconfigured': 'No MiniMax API key yet — click to open settings',
       'pill.tip.loading': 'Querying MiniMax plan usage…',
@@ -130,11 +132,8 @@ window.__ModuleLoader__.load({
       'panel.interval': '5-hour remaining',
       'panel.weekly': 'Weekly remaining',
       'panel.displayed': 'Showing',
-      'panel.remaining': 'Remaining',
-      'panel.used': 'Used',
-      'panel.total': 'Total',
       'panel.resetIn': 'resets in {time}',
-      'panel.updatedAt': 'Updated {time}',
+      'panel.updatedAt': 'Updated at',
       'panel.models': 'Models',
       'panel.model': 'Model',
       'panel.noAbsolute': 'This plan reports no absolute token counts',
@@ -143,7 +142,6 @@ window.__ModuleLoader__.load({
       'panel.noData': 'No data',
       'panel.refresh': 'Refresh',
       'panel.settings': 'Settings',
-      'panel.close': 'Close',
       'settings.apiKey': 'API key',
       'settings.apiKeyHint': 'MiniMax M Plan key (starts with sk-cp-), stored on this machine only.',
       'settings.apiKeyPlaceholder': 'sk-cp-…',
@@ -155,19 +153,20 @@ window.__ModuleLoader__.load({
       'settings.error.empty': 'Please enter an API key',
       'settings.error.failed': 'Could not save: {message}',
       'settings.error.crypto': 'WebCrypto is unavailable here, so the key cannot be stored encrypted',
+      'settings.error.request': 'Could not reach the MiniMax plan usage endpoint',
       'settings.region': 'Service region',
       'settings.region.auto': 'Detect automatically',
       'settings.region.global': 'Global api.minimax.io',
       'settings.region.cn': 'China api.minimax.cn',
       'settings.metric': 'Default metric',
-      'settings.metric.interval': '5-hour remaining',
-      'settings.metric.weekly': 'Weekly remaining',
-      'settings.metric.lowestAbsolute': 'Lowest absolute tokens',
-      'settings.metric.lowestPercent': 'Lowest percentage',
       'settings.refreshMinutes': 'Refresh interval (minutes)',
       'settings.security': 'The API key is encrypted with AES-256-GCM and stored in the local IndexedDB; the key itself is non-extractable. Requests only reach the official MiniMax hosts.',
       'settings.keyPresent': 'API key saved (encrypted)',
       'settings.keyMissing': 'No API key saved yet',
+      'duration.hm': '{h}h {m}m',
+      'duration.h': '{h}h',
+      'duration.m': '{m}m',
+      'duration.s': '{s}s',
       'metric.interval': '5-hour remaining',
       'metric.weekly': 'Weekly remaining',
       'metric.lowestAbsolute': 'Lowest absolute tokens',
@@ -178,8 +177,8 @@ window.__ModuleLoader__.load({
      * Small helpers
      * ------------------------------------------------------------------ */
 
-    function messageOf(error) {
-      if (!error) return 'unknown error'
+    function messageOf(error, fallback) {
+      if (!error) return fallback || 'unknown error'
       if (typeof error === 'string') return error
       if (error.message) return String(error.message)
       return String(error)
@@ -196,17 +195,23 @@ window.__ModuleLoader__.load({
 
     function formatCount(value) {
       if (value === null || value === undefined || !Number.isFinite(value)) return '—'
-      return Math.round(value).toLocaleString('en-US')
+      return Math.round(value).toLocaleString()
     }
 
-    function formatDuration(ms) {
+    function formatDuration(ms, t) {
       if (ms === null || ms === undefined || !Number.isFinite(ms) || ms < 0) return '—'
       const totalMinutes = Math.floor(ms / 60000)
       const hours = Math.floor(totalMinutes / 60)
       const minutes = totalMinutes % 60
-      if (hours > 0) return `${hours}h ${minutes}m`
-      if (minutes > 0) return `${minutes}m`
-      return `${Math.floor(ms / 1000)}s`
+      const translate = typeof t === 'function' ? t : null
+      if (hours > 0) {
+        return translate ? translate('duration.hm', { h: hours, m: minutes }) : `${hours}h ${minutes}m`
+      }
+      if (minutes > 0) {
+        return translate ? translate('duration.m', { m: minutes }) : `${minutes}m`
+      }
+      const seconds = Math.floor(ms / 1000)
+      return translate ? translate('duration.s', { s: seconds }) : `${seconds}s`
     }
 
     function formatClock(timestamp) {
@@ -520,6 +525,28 @@ window.__ModuleLoader__.load({
       return `${stats.percent}%`
     }
 
+    /**
+     * The same reading with a textual cue, so the state never depends on
+     * colour alone: an exhausted window is named, an unlimited window is
+     * named, and a low window carries a warning glyph.
+     */
+    function stateText(stats, t) {
+      if (!stats) return '—'
+      if (stats.unlimited) return t('panel.unlimited')
+      if (stats.exhausted) return t('panel.exhausted')
+      const percent = percentText(stats)
+      if (stats.percent !== null && stats.percent <= 20) return `${t('pill.warn')}${percent}`
+      return percent
+    }
+
+    /** Turns a stored failure into a readable message. */
+    function errorText(message, t) {
+      if (!message) return t('pill.error')
+      if (message === 'REQUEST_FAILED') return t('settings.error.request')
+      if (message === 'WEB_CRYPTO_UNAVAILABLE') return t('settings.error.crypto')
+      return message
+    }
+
     /* ------------------------------------------------------------------ *
      * Store
      * ------------------------------------------------------------------ */
@@ -637,7 +664,16 @@ window.__ModuleLoader__.load({
           return
         }
         if (!force && state.status === 'loading') return
-        if (inflight) return inflight
+        if (inflight) {
+          if (!force) return inflight
+          // A forced refresh (for example right after the key changed) waits for
+          // the running request so it cannot be answered with stale data.
+          try {
+            await inflight
+          } catch (error) {
+            /* the previous request already reported its own failure */
+          }
+        }
         set({ status: 'loading' })
         inflight = (async () => {
           try {
@@ -704,7 +740,12 @@ window.__ModuleLoader__.load({
         if (age >= intervalMs) refresh(false)
       }
 
-      return { subscribe, getState, load, refresh, saveSecret, removeSecret, setPrefs, tick }
+      /** Releases the subscribers when the plugin is disabled. */
+      function dispose() {
+        listeners.clear()
+      }
+
+      return { subscribe, getState, load, refresh, saveSecret, removeSecret, setPrefs, tick, dispose }
     })()
 
     /* ------------------------------------------------------------------ *
@@ -720,41 +761,46 @@ button.mm-pill{cursor:pointer}
 button.mm-pill[aria-expanded='true']{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary)}
 @media (hover:hover){button.mm-pill:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary)}}
 .mm-label{min-width:0;overflow:hidden;text-overflow:ellipsis}
-.mm-busy{color:var(--dsw-alias-label-quaternary)}
+.mm-busy{color:var(--dsw-alias-label-caption)}
 .mm-error{color:var(--dsw-alias-state-error-primary)}
 .mm-warn{color:var(--dsw-alias-state-warn-primary)}
 .mm-good{color:var(--dsw-alias-state-success-primary)}
 .mm-tip{position:relative;display:inline-flex;min-width:0}
-.mm-tip::after{content:attr(data-tip);position:absolute;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%);z-index:1100;max-width:280px;padding:4px 8px;border-radius:var(--dsw-radius-sm);background:var(--dsw-alias-tooltip-bg);color:var(--dsw-alias-tooltip-label);font-size:11px;line-height:16px;white-space:nowrap;opacity:0;pointer-events:none;transition:opacity .12s ease}
+.mm-tip::after{content:attr(data-tip);position:absolute;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%);z-index:1100;max-width:280px;padding:4px 8px;border-radius:var(--dsw-radius-sm);background:var(--dsw-alias-tooltip-bg);color:var(--dsw-alias-tooltip-label);font-size:11px;line-height:16px;text-align:left;white-space:normal;overflow-wrap:anywhere;opacity:0;pointer-events:none;transition:opacity .12s ease}
 .mm-tip:hover::after,.mm-tip:focus-within::after{opacity:1}
-.mm-panel{position:fixed;z-index:1100;box-sizing:border-box;width:max-content;min-width:min(320px,calc(100vw - 24px));max-width:min(460px,calc(100vw - 24px));padding:16px;border:0;border-radius:var(--dsw-radius-lg);background:var(--dsw-specific-menu);backdrop-filter:var(--dsw-menu-backdrop-filter);--dsw-elevation-stroke-color:var(--dsw-alias-border-l1);box-shadow:var(--dsw-elevation-prominent);font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary);cursor:default;max-height:calc(100dvh - 12px - max(12px,var(--dsh-frame-overlay-top,12px)));overflow-x:hidden;overflow-y:auto;--dsh-scrollbar-thumb:var(--dsw-alias-scrollbar-bg-l2);--dsh-scrollbar-thumb-hover:var(--dsw-alias-scrollbar-hover-l2);position-area:none;top:max(12px,var(--dsh-frame-overlay-top,12px));bottom:max(12px,calc(anchor(top) + 8px));left:max(12px,anchor(left));right:12px;position-try-fallbacks:--dsh-stat-window,--dsh-stat-opposite,--dsh-stat-wide-opposite,--dsh-stat-tall,--dsh-stat-viewport;align-self:end;justify-self:start;height:fit-content;min-height:0;margin:0}
+.mm-tip-open::after{display:none}
+.mm-panel{position:fixed;z-index:1100;box-sizing:border-box;width:max-content;min-width:min(300px,calc(100vw - 24px));max-width:min(440px,calc(100vw - 24px));padding:16px;border:0;border-radius:var(--dsw-radius-lg);background:var(--dsw-specific-menu);backdrop-filter:var(--dsw-menu-backdrop-filter);--dsw-elevation-stroke-color:var(--dsw-alias-border-l1);box-shadow:var(--dsw-elevation-prominent);font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary);cursor:default;max-height:calc(100dvh - 12px - max(12px,var(--dsh-frame-overlay-top,12px)));overflow-x:hidden;overflow-y:auto;--dsh-scrollbar-thumb:var(--dsw-alias-scrollbar-bg-l2);--dsh-scrollbar-thumb-hover:var(--dsw-alias-scrollbar-hover-l2);position-area:none;top:max(12px,var(--dsh-frame-overlay-top,12px));bottom:max(12px,calc(anchor(top) + 8px));left:max(12px,anchor(left));right:12px;position-try-fallbacks:--dsh-stat-window,--dsh-stat-opposite,--dsh-stat-wide-opposite,--dsh-stat-tall,--dsh-stat-viewport;align-self:end;justify-self:start;height:fit-content;min-height:0;margin:0}
+.mm-panel:focus{outline:none}
 .mm-title{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:8px;color:var(--dsw-alias-label-primary);font-weight:500}
 .mm-title-label{display:inline-flex;align-items:center;gap:6px;min-width:0}
 .mm-title-label svg{width:14px;height:14px;flex:none}
 .mm-title-value{font-variant-numeric:tabular-nums}
-.mm-rule{margin:10px 0;border-top:.5px solid var(--dsw-alias-border-l2)}
+.mm-rule{margin:8px 0;border-top:.5px solid var(--dsw-alias-border-l2)}
 .mm-details{display:grid;grid-template-columns:minmax(76px,auto) minmax(0,1fr);gap:6px 16px;margin:0;color:var(--dsw-alias-label-tertiary)}
 .mm-details dt,.mm-details dd{min-width:0;margin:0}
 .mm-details dd{color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums;text-align:right}
 .mm-section{margin:0 0 6px;color:var(--dsw-alias-label-primary);font-weight:500}
 .mm-table{display:grid;grid-template-columns:minmax(0,1fr) minmax(64px,auto) minmax(64px,auto);gap:4px 12px;margin:0;color:var(--dsw-alias-label-tertiary)}
 .mm-table span:nth-child(3n+2),.mm-table span:nth-child(3n+3){text-align:right;font-variant-numeric:tabular-nums}
-.mm-table .mm-head{color:var(--dsw-alias-label-quaternary)}
+.mm-table .mm-head{color:var(--dsw-alias-label-caption)}
 .mm-table .mm-name{color:var(--dsw-alias-label-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .mm-field{display:grid;grid-template-columns:minmax(0,1fr);gap:4px;margin:0 0 10px}
 .mm-field-label{color:var(--dsw-alias-label-primary)}
-.mm-field-hint{color:var(--dsw-alias-label-quaternary)}
+.mm-field-hint{color:var(--dsw-alias-label-caption)}
 .mm-input,.mm-select{box-sizing:border-box;width:100%;padding:4px 8px;border:1px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-sm);background:var(--dsw-specific-input-major);color:var(--dsw-alias-label-primary);font:inherit;font-variant-numeric:tabular-nums}
-.mm-input:focus,.mm-select:focus{outline:none;border-color:var(--dsw-alias-border-selected)}
+.mm-input:focus,.mm-select:focus{border-color:var(--dsw-alias-border-selected)}
+.mm-input:focus-visible,.mm-select:focus-visible,.mm-button:focus-visible{outline-style:solid;outline-offset:-2px}
 .mm-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .mm-button{padding:3px 10px;border:1px solid transparent;border-radius:var(--dsw-radius-sm);background:var(--dsw-alias-button-primary-fill);color:var(--dsw-alias-label-on-color);font:inherit;cursor:pointer}
 .mm-button:hover{background:var(--dsw-alias-button-primary-hover)}
 .mm-button[disabled]{opacity:.6;cursor:default}
 .mm-button.mm-ghost{background:transparent;border-color:var(--dsw-alias-border-l2);color:var(--dsw-alias-label-secondary)}
 .mm-button.mm-ghost:hover{background:var(--dsw-alias-interactive-bg-hover)}
-.mm-note{margin:0;color:var(--dsw-alias-label-quaternary)}
+.mm-button.mm-danger{background:transparent;border-color:var(--dsw-alias-border-l2);color:var(--dsw-alias-state-error-primary)}
+.mm-button.mm-danger:hover{background:var(--dsw-alias-interactive-bg-hover)}
+.mm-note{margin:0;color:var(--dsw-alias-label-caption)}
 .mm-status{margin:0;color:var(--dsw-alias-label-tertiary)}
-.mm-inline{display:inline-flex;align-items:center;gap:6px}
+.mm-status.mm-error{color:var(--dsw-alias-state-error-primary)}
 `
 
     /* ------------------------------------------------------------------ *
@@ -791,35 +837,110 @@ button.mm-pill[aria-expanded='true']{background:var(--dsw-alias-interactive-bg-h
       }, [injected])
     }
 
-    function usePanelDismiss(open, setOpen, rootRef, panelRef) {
+    const FOCUSABLE_SELECTOR = [
+      'a[href]',
+      'button:not([disabled])',
+      'input:not([disabled])',
+      'select:not([disabled])',
+      'textarea:not([disabled])',
+      '[tabindex]:not([tabindex="-1"])',
+    ].join(',')
+
+    /** Keeps Tab inside the panel while it is open. */
+    function trapTab(event, panelRef) {
+      const panel = panelRef.current
+      if (!panel) return
+      const items = Array.prototype.slice
+        .call(panel.querySelectorAll(FOCUSABLE_SELECTOR))
+        .filter((element) => element.getClientRects().length > 0)
+      if (!items.length) {
+        event.preventDefault()
+        if (typeof panel.focus === 'function') panel.focus()
+        return
+      }
+      const first = items[0]
+      const last = items[items.length - 1]
+      const active = document.activeElement
+      const outside = !active || !panel.contains(active)
+      if (event.shiftKey && (active === first || outside)) {
+        event.preventDefault()
+        last.focus()
+        return
+      }
+      if (!event.shiftKey && (active === last || outside)) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+
+    function usePanelDismiss(open, setOpen, rootRef, panelRef, triggerRef) {
       useEffect(() => {
         if (!open) return undefined
         function onKeyDown(event) {
-          if (event.key === 'Escape') setOpen(false)
+          if (event.key === 'Escape') {
+            setOpen(false)
+            return
+          }
+          if (event.key === 'Tab') trapTab(event, panelRef)
         }
-        function onPointerDown(event) {
+        function isInside(event) {
           const root = rootRef.current
           const panel = panelRef.current
-          if (!root || !panel) return
-          if (root.contains(event.target) || panel.contains(event.target)) return
+          if (!root || !panel) return true
+          return root.contains(event.target) || panel.contains(event.target)
+        }
+        function onPointerDown(event) {
+          if (isInside(event)) return
+          setOpen(false)
+        }
+        function onClick(event) {
+          // Keyboard activation of a sibling trigger fires a click without a
+          // pointerdown; closing here keeps two panels from stacking.
+          if (isInside(event)) return
           setOpen(false)
         }
         document.addEventListener('keydown', onKeyDown, true)
         document.addEventListener('pointerdown', onPointerDown, true)
+        document.addEventListener('click', onClick, true)
         return () => {
           document.removeEventListener('keydown', onKeyDown, true)
           document.removeEventListener('pointerdown', onPointerDown, true)
+          document.removeEventListener('click', onClick, true)
         }
       }, [open, rootRef, panelRef, setOpen])
+
+      // Move focus into the panel when it opens and hand it back to the pill
+      // when it closes, so the settings form is reachable by keyboard.
+      const wasOpen = useRef(false)
+      useEffect(() => {
+        if (open) {
+          wasOpen.current = true
+          const frame = requestAnimationFrame(() => {
+            const panel = panelRef.current
+            if (panel && typeof panel.focus === 'function') panel.focus()
+          })
+          return () => cancelAnimationFrame(frame)
+        }
+        if (!wasOpen.current) return undefined
+        wasOpen.current = false
+        const active = typeof document !== 'undefined' ? document.activeElement : null
+        if (!active || active === document.body) {
+          const trigger = triggerRef && triggerRef.current
+          if (trigger && typeof trigger.focus === 'function') trigger.focus()
+        }
+        return undefined
+      }, [open, panelRef, triggerRef])
     }
 
     function QuotaPanel(props) {
       const t = useTranslate(props)
+      const idPrefix = props.idPrefix || 'mm'
       const state = useSyncExternalStore(store.subscribe, store.getState, store.getState)
       const [settingsOpen, setSettingsOpen] = useState(false)
       const [keyDraft, setKeyDraft] = useState('')
       const [busy, setBusy] = useState(false)
       const [notice, setNotice] = useState('')
+      const [intervalDraft, setIntervalDraft] = useState(null)
       const [, forceTick] = useState(0)
 
       const snapshot = state.snapshot
@@ -844,25 +965,29 @@ button.mm-pill[aria-expanded='true']{background:var(--dsw-alias-interactive-bg-h
       const five = intervalEntry()
       const week = weeklyEntry()
 
+      /** A reading with its textual cue and, when the plan reports one, the count. */
+      function readingText(stats) {
+        if (!stats) return t('panel.noData')
+        const parts = [stateText(stats, t)]
+        if (stats.remaining !== null) parts.push(formatCount(stats.remaining))
+        return parts.join(' · ')
+      }
+
       function windowRow(label, picked) {
         if (!picked) {
           return [h('dt', { key: `${label}-label` }, label), h('dd', { key: `${label}-value` }, t('panel.noData'))]
         }
         const stats = picked.stats
-        const parts = [percentText(stats)]
-        if (stats.remaining !== null) {
-          parts.push(`${formatCount(stats.remaining)}`)
-        }
         const resetIn = picked.window === 'interval'
           ? picked.model.intervalResetAt
           : picked.model.weeklyResetAt
         const rows = [
           h('dt', { key: `${label}-label` }, label),
-          h('dd', { key: `${label}-value` }, parts.join(' · ')),
+          h('dd', { key: `${label}-value` }, readingText(stats)),
         ]
         if (resetIn) {
           const remaining = Math.max(0, resetIn)
-          rows.push(h('dt', { key: `${label}-reset-label` }, t('panel.resetIn', { time: formatDuration(remaining) })))
+          rows.push(h('dt', { key: `${label}-reset-label` }, t('panel.resetIn', { time: formatDuration(remaining, t) })))
           rows.push(h('dd', { key: `${label}-reset-value` }, formatClock(Date.now() + remaining)))
         }
         return rows
@@ -892,12 +1017,24 @@ button.mm-pill[aria-expanded='true']{background:var(--dsw-alias-interactive-bg-h
 
       async function onClear() {
         setBusy(true)
+        setNotice('')
         try {
           await store.removeSecret()
           setKeyDraft('')
           setNotice(t('settings.cleared'))
+        } catch (error) {
+          setNotice(t('settings.error.failed', { message: messageOf(error) }))
         } finally {
           setBusy(false)
+        }
+      }
+
+      function commitInterval() {
+        if (intervalDraft === null) return
+        const value = Number.parseInt(intervalDraft, 10)
+        setIntervalDraft(null)
+        if (Number.isFinite(value) && value >= 1 && value <= 60) {
+          store.setPrefs({ refreshMinutes: value })
         }
       }
 
@@ -905,7 +1042,7 @@ button.mm-pill[aria-expanded='true']{background:var(--dsw-alias-interactive-bg-h
 
       children.push(h('div', { className: 'mm-title', key: 'title' },
         h('span', { className: 'mm-title-label' }, h(GaugeIcon, null), h('span', null, t('panel.title'))),
-        h('span', { className: 'mm-title-value' }, entry ? percentText(entry.stats) : t('pill.idle'))))
+        h('span', { className: 'mm-title-value' }, entry ? stateText(entry.stats, t) : t('pill.idle'))))
 
       children.push(h('div', { className: 'mm-rule', key: 'rule-1' }))
 
@@ -914,12 +1051,14 @@ button.mm-pill[aria-expanded='true']{background:var(--dsw-alias-interactive-bg-h
       details.push(h('dd', { key: 'displayed-value' }, metricLabel))
       details.push(...windowRow(t('panel.interval'), five))
       details.push(...windowRow(t('panel.weekly'), week))
-      details.push(h('dt', { key: 'updated-label' }, t('panel.updatedAt', { time: formatClock(state.updatedAt) })))
-      details.push(h('dd', { key: 'updated-value' }, entry ? (entry.model ? entry.model.name : '') : ''))
+      details.push(h('dt', { key: 'model-label' }, t('panel.model')))
+      details.push(h('dd', { key: 'model-value' }, entry && entry.model ? entry.model.name : t('panel.noData')))
+      details.push(h('dt', { key: 'updated-label' }, t('panel.updatedAt')))
+      details.push(h('dd', { key: 'updated-value' }, state.updatedAt ? formatClock(state.updatedAt) : t('panel.noData')))
       children.push(h('dl', { className: 'mm-details', key: 'details' }, details))
 
       if (state.status === 'error') {
-        children.push(h('p', { className: 'mm-status mm-error', key: 'error' }, state.error || t('pill.error')))
+        children.push(h('p', { className: 'mm-status mm-error', key: 'error' }, errorText(state.error, t)))
       }
 
       if (snapshot && snapshot.models.length) {
@@ -930,9 +1069,9 @@ button.mm-pill[aria-expanded='true']{background:var(--dsw-alias-interactive-bg-h
         cells.push(h('span', { className: 'mm-head', key: 'h2' }, t('panel.interval')))
         cells.push(h('span', { className: 'mm-head', key: 'h3' }, t('panel.weekly')))
         snapshot.models.forEach((model, index) => {
-          cells.push(h('span', { className: 'mm-name', key: `n${index}` }, model.name))
-          cells.push(h('span', { key: `i${index}` }, percentText(model.interval)))
-          cells.push(h('span', { key: `w${index}` }, percentText(model.weekly)))
+          cells.push(h('span', { className: 'mm-name', key: `n${index}`, title: model.name }, model.name))
+          cells.push(h('span', { key: `i${index}` }, readingText(model.interval)))
+          cells.push(h('span', { key: `w${index}` }, readingText(model.weekly)))
         })
         children.push(h('div', { className: 'mm-table', key: 'models' }, cells))
         const hasAbsolute = snapshot.models.some((model) => model.interval.remaining !== null || model.weekly.remaining !== null)
@@ -959,9 +1098,9 @@ button.mm-pill[aria-expanded='true']{background:var(--dsw-alias-interactive-bg-h
       if (settingsOpen) {
         children.push(h('div', { className: 'mm-rule', key: 'rule-4' }))
         children.push(h('form', { className: 'mm-field', key: 'key-form', onSubmit: onSave },
-          h('label', { className: 'mm-field-label', htmlFor: 'mm-api-key' }, t('settings.apiKey')),
+          h('label', { className: 'mm-field-label', htmlFor: `${idPrefix}-api-key` }, t('settings.apiKey')),
           h('input', {
-            id: 'mm-api-key',
+            id: `${idPrefix}-api-key`,
             className: 'mm-input',
             type: 'password',
             autoComplete: 'off',
@@ -972,23 +1111,29 @@ button.mm-pill[aria-expanded='true']{background:var(--dsw-alias-interactive-bg-h
           }),
           h('p', { className: 'mm-field-hint' }, t('settings.apiKeyHint')),
           h('div', { className: 'mm-row' },
-            h('button', { type: 'submit', className: 'mm-button', disabled: busy }, busy ? t('settings.saving') : t('settings.save')),
-            h('button', { type: 'button', className: 'mm-button mm-ghost', disabled: busy, onClick: onClear }, t('settings.clear')),
-            h('span', { className: 'mm-field-hint' }, state.hasKey ? t('settings.keyPresent') : t('settings.keyMissing')))))
+            h('button', { type: 'submit', className: 'mm-button', disabled: busy }, busy ? t('settings.saving') : t('settings.save')))))
+
+        children.push(h('div', { className: 'mm-row', key: 'key-clear-row' },
+          h('button', { type: 'button', className: 'mm-button mm-danger', disabled: busy, onClick: onClear }, t('settings.clear')),
+          h('span', { className: 'mm-field-hint' }, state.hasKey ? t('settings.keyPresent') : t('settings.keyMissing'))))
+
+        if (notice) {
+          children.push(h('p', { className: 'mm-status', key: 'notice', role: 'status', 'aria-live': 'polite' }, notice))
+        }
 
         children.push(h('div', { className: 'mm-field', key: 'metric-field' },
-          h('label', { className: 'mm-field-label', htmlFor: 'mm-metric' }, t('settings.metric')),
+          h('label', { className: 'mm-field-label', htmlFor: `${idPrefix}-metric` }, t('settings.metric')),
           h('select', {
-            id: 'mm-metric',
+            id: `${idPrefix}-metric`,
             className: 'mm-select',
             value: state.metric,
             onChange: (event) => store.setPrefs({ metric: event.target.value }),
           }, METRIC_IDS.map((id) => h('option', { key: id, value: id }, t(`metric.${id}`))))))
 
         children.push(h('div', { className: 'mm-field', key: 'region-field' },
-          h('label', { className: 'mm-field-label', htmlFor: 'mm-region' }, t('settings.region')),
+          h('label', { className: 'mm-field-label', htmlFor: `${idPrefix}-region` }, t('settings.region')),
           h('select', {
-            id: 'mm-region',
+            id: `${idPrefix}-region`,
             className: 'mm-select',
             value: state.region,
             onChange: (event) => store.setPrefs({ region: event.target.value }),
@@ -998,29 +1143,56 @@ button.mm-pill[aria-expanded='true']{background:var(--dsw-alias-interactive-bg-h
           h('option', { key: 'cn', value: 'cn' }, t('settings.region.cn')))))
 
         children.push(h('div', { className: 'mm-field', key: 'interval-field' },
-          h('label', { className: 'mm-field-label', htmlFor: 'mm-interval' }, t('settings.refreshMinutes')),
+          h('label', { className: 'mm-field-label', htmlFor: `${idPrefix}-interval` }, t('settings.refreshMinutes')),
           h('input', {
-            id: 'mm-interval',
+            id: `${idPrefix}-interval`,
             className: 'mm-input',
             type: 'number',
             min: 1,
             max: 60,
             step: 1,
-            value: String(state.refreshMinutes),
-            onChange: (event) => {
-              const value = Number.parseInt(event.target.value, 10)
-              if (Number.isFinite(value) && value >= 1 && value <= 60) store.setPrefs({ refreshMinutes: value })
+            value: intervalDraft === null ? String(state.refreshMinutes) : intervalDraft,
+            onChange: (event) => setIntervalDraft(event.target.value),
+            onBlur: commitInterval,
+            onKeyDown: (event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault()
+                commitInterval()
+              }
             },
           })))
 
         children.push(h('p', { className: 'mm-note', key: 'security' }, t('settings.security')))
+      } else if (notice) {
+        children.push(h('p', { className: 'mm-status', key: 'notice', role: 'status', 'aria-live': 'polite' }, notice))
       }
 
-      if (notice) {
-        children.push(h('p', { className: 'mm-status', key: 'notice' }, notice))
-      }
+      return h('div', {
+        ref: props.panelRef,
+        id: props.panelId,
+        className: 'mm-panel',
+        role: 'dialog',
+        'aria-label': t('panel.title'),
+        tabIndex: -1,
+        style: { positionAnchor: props.anchorName },
+      }, children)
+    }
 
-      return h('div', { ref: props.panelRef, className: 'mm-panel', role: 'dialog', 'aria-label': t('panel.title') }, children)
+    let stylesInjected = false
+
+    /** The stylesheet is owned by the plugin and lives in the document head. */
+    function ensureStyles() {
+      if (stylesInjected) return
+      if (typeof document === 'undefined' || !document.head) return
+      if (document.querySelector('style[data-dsh-minimax-token-plan]')) {
+        stylesInjected = true
+        return
+      }
+      const element = document.createElement('style')
+      element.setAttribute('data-dsh-minimax-token-plan', '')
+      element.textContent = STYLE
+      document.head.appendChild(element)
+      stylesInjected = true
     }
 
     function MiniMaxTokenPlanPill(props) {
@@ -1029,16 +1201,21 @@ button.mm-pill[aria-expanded='true']{background:var(--dsw-alias-interactive-bg-h
       const [open, setOpen] = useState(false)
       const rootRef = useRef(null)
       const panelRef = useRef(null)
+      const triggerRef = useRef(null)
       const anchorId = useRef(null)
       if (anchorId.current === null) {
         anchorId.current = `mm${Math.random().toString(36).slice(2, 9)}`
       }
       const anchorName = `--dsh-mm-${anchorId.current}`
+      const panelId = `${anchorId.current}-panel`
 
-      usePanelDismiss(open, setOpen, rootRef, panelRef)
+      usePanelDismiss(open, setOpen, rootRef, panelRef, triggerRef)
 
       useEffect(() => {
-        store.refresh(false)
+        ensureStyles()
+        // Only fetch when the data is missing or stale; mounting a second
+        // composer must not trigger another request.
+        store.tick()
       }, [])
 
       const entry = pickMetric(state.snapshot, state.metric)
@@ -1056,30 +1233,34 @@ button.mm-pill[aria-expanded='true']{background:var(--dsw-alias-interactive-bg-h
         tip = t('pill.tip.unconfigured')
       } else if (state.status === 'error') {
         label = t('pill.error')
-        tip = t('pill.tip.error', { message: state.error || '' })
+        tip = t('pill.tip.error', { message: errorText(state.error, t) })
         tone = 'mm-error'
       } else if (entry) {
-        label = percentText(entry.stats)
+        label = stateText(entry.stats, t)
         tip = t('pill.tip.ready', { metric: metricLabel, value: label })
         if (entry.stats.exhausted || (entry.stats.percent !== null && entry.stats.percent <= 20)) tone = 'mm-warn'
         else if (entry.stats.percent !== null && entry.stats.percent >= 50) tone = 'mm-good'
       }
 
       return h('span', { className: 'mm-root', key: 'root' },
-        h('style', { key: 'style', dangerouslySetInnerHTML: { __html: STYLE } }),
         h('span', { ref: rootRef, style: { anchorName }, className: 'mm-anchor', 'data-composer-stat': SLOT_ID, key: 'anchor' },
-          h('span', { className: 'mm-tip', 'data-tip': tip, key: 'tip' },
+          h('span', { className: `mm-tip${open ? ' mm-tip-open' : ''}`, 'data-tip': tip, key: 'tip' },
             h('button', {
+              ref: triggerRef,
               type: 'button',
               className: `mm-pill ${tone}`.trim(),
               'aria-haspopup': 'dialog',
               'aria-expanded': open,
-              'aria-label': tip,
+              'aria-controls': open ? panelId : undefined,
+              'aria-label': `${label} · ${tip}`,
               onClick: () => setOpen((value) => !value),
             },
             h(GaugeIcon, null),
             h('span', { className: 'mm-label' }, label))),
-          open && createPortal(h(QuotaPanel, { panelRef, t }), document.body)))
+          open && createPortal(
+            h(QuotaPanel, { panelRef, t, idPrefix: anchorId.current, anchorName, panelId }),
+            document.body,
+          )))
     }
 
     /* ------------------------------------------------------------------ *
@@ -1102,6 +1283,10 @@ button.mm-pill[aria-expanded='true']{background:var(--dsw-alias-interactive-bg-h
           const timer = setInterval(() => store.tick(), TICK_MS)
           return () => clearInterval(timer)
         }, 'minimax token plan: polling')
+
+        return () => {
+          store.dispose()
+        }
       },
     }
 
@@ -1115,6 +1300,10 @@ button.mm-pill[aria-expanded='true']{background:var(--dsw-alias-interactive-bg-h
         pickMetric,
         primaryEntry,
         percentText,
+        stateText,
+        errorText,
+        formatDuration,
+        clampPct,
       }
     }
     return plugin

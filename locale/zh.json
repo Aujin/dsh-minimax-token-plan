@@ -1,6 +1,7 @@
 {
   "meta": {
     "title": "MiniMax 套餐余量",
-    "description": "在会话底部的 token 用量旁显示 MiniMax Token Plan 的 5 小时与每周剩余用量。"
+    "description": "在会话底部的 token 用量旁显示 MiniMax Token Plan 的 5 小时与每周剩余用量。",
+    "detail": "docs/DETAIL.zh.md"
   }
 }
